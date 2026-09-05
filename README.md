@@ -143,14 +143,18 @@
 
 ### Запуск:
 ```bash
-./start-demo.sh
+./demo/start-demo.sh
 ```
-*(или напрямую через `docker compose -f docker-compose.demo.yml up -d`)*
+*(или из папки `demo/`: `cd demo && docker compose up -d`)*
+
+Подробное руководство со сценариями демонстрации и архитектурой стенда доступно в документе **[DEMO.md](DEMO.md)**.
 
 ### Остановка:
 ```bash
-./stop-demo.sh
+./demo/stop-demo.sh
 ```
+*(или `cd demo && docker compose down -v`)*
+
 
 ---
 
@@ -395,20 +399,23 @@ yarn-explorer/
 │   │   └── types.ts             # TypeScript интерфейсы
 │   ├── package.json             # Зависимости и скрипты сборки
 │   └── vite.config.ts           # Конфигурация сборщика Vite
-├── demo/                        # Конфигурации демонстрационного стенда
-│   ├── cluster-1/               # Hadoop RM 1 конфигурации
-│   ├── cluster-2/               # Hadoop RM 2 конфигурации
-│   ├── kdc/                     # Kerberos KDC Dockerfile и генерация keytabs
+├── demo/                        # Полный демонстрационный стенд (Kerberos KDC, OpenLDAP, 2x Hadoop RM)
+│   ├── docker-compose.yml       # Спецификация сервисов демо-стенда
+│   ├── start-demo.sh            # Скрипт быстрого запуска стенда
+│   ├── stop-demo.sh             # Скрипт остановки и очистки томов
+│   ├── cluster-1/               # Hadoop RM 1 конфигурации (Production)
+│   ├── cluster-2/               # Hadoop RM 2 конфигурации (Analytics & ML)
+│   ├── kdc/                     # Kerberos KDC Dockerfile и скрипт инициализации
 │   ├── ldap/                    # OpenLDAP конфигурация и пользователи
 │   └── config.yaml              # Конфиг YARN Explorer для демо-стенда
-├── docker-compose.demo.yml      # Docker Compose демо-стенда
 ├── helm/yarn-explorer/          # Production-ready Helm-чарт для развертывания в Kubernetes
 │   ├── Chart.yaml               # Описание и метаданные чарта
 │   ├── values.yaml              # Параметры по умолчанию (resources, ingress, kerberos, db)
 │   └── templates/               # Манифесты K8s (Deployment, Service, Ingress, PVC, ConfigMap, Secret)
 ├── Dockerfile                   # Production Dockerfile YARN Explorer
-├── start-demo.sh                # Скрипт быстрого запуска стенда
-└── stop-demo.sh                 # Скрипт остановки стенда
+├── DEMO.md                      # Подробное руководство по демонстрационному стенду
+└── README.md
+
 
 ```
 

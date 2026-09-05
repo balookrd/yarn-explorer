@@ -14,7 +14,7 @@ volumes:
 services:
   yarn-demo-kdc:
     build:
-      context: ./demo/kdc
+      context: ./kdc
     container_name: yarn-demo-kdc
     hostname: kdc.yarn-demo-net
     networks:
@@ -37,7 +37,7 @@ services:
 
   yarn-demo-ldap:
     build:
-      context: ./demo/ldap
+      context: ./ldap
     container_name: yarn-demo-ldap
     hostname: ldap
     networks:
@@ -71,10 +71,10 @@ services:
     volumes:
       - yarn-demo-shared-krb5:/shared-krb5:ro
       - yarn-demo-shared-keytabs:/etc/security/keytabs:ro
-      - ./demo/cluster-1/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
-      - ./demo/cluster-1/yarn-site.xml:/opt/hadoop/etc/hadoop/yarn-site.xml:ro
-      - ./demo/cluster-1/capacity-scheduler.xml:/opt/hadoop/etc/hadoop/capacity-scheduler.xml:ro
-      - ./demo/hadoop-common/entrypoint.sh:/entrypoint.sh:ro
+      - ./cluster-1/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
+      - ./cluster-1/yarn-site.xml:/opt/hadoop/etc/hadoop/yarn-site.xml:ro
+      - ./cluster-1/capacity-scheduler.xml:/opt/hadoop/etc/hadoop/capacity-scheduler.xml:ro
+      - ./hadoop-common/entrypoint.sh:/entrypoint.sh:ro
     entrypoint: ["/entrypoint.sh"]
     depends_on:
       yarn-demo-kdc:
@@ -99,10 +99,10 @@ services:
     volumes:
       - yarn-demo-shared-krb5:/shared-krb5:ro
       - yarn-demo-shared-keytabs:/etc/security/keytabs:ro
-      - ./demo/cluster-2/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
-      - ./demo/cluster-2/yarn-site.xml:/opt/hadoop/etc/hadoop/yarn-site.xml:ro
-      - ./demo/cluster-2/capacity-scheduler.xml:/opt/hadoop/etc/hadoop/capacity-scheduler.xml:ro
-      - ./demo/hadoop-common/entrypoint.sh:/entrypoint.sh:ro
+      - ./cluster-2/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
+      - ./cluster-2/yarn-site.xml:/opt/hadoop/etc/hadoop/yarn-site.xml:ro
+      - ./cluster-2/capacity-scheduler.xml:/opt/hadoop/etc/hadoop/capacity-scheduler.xml:ro
+      - ./hadoop-common/entrypoint.sh:/entrypoint.sh:ro
     entrypoint: ["/entrypoint.sh"]
     depends_on:
       yarn-demo-kdc:
@@ -111,7 +111,7 @@ services:
 
   yarn-demo-explorer:
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile
     container_name: yarn-demo-explorer
     hostname: yarn-explorer.yarn-demo-net
@@ -128,7 +128,7 @@ services:
       - DB_PATH=/app/data/yarn_explorer.db
       - PYTHONUNBUFFERED=1
     volumes:
-      - ./demo:/app/demo:ro
+      - ./:/app/demo:ro
       - yarn-demo-shared-krb5:/shared-krb5:ro
       - yarn-demo-shared-keytabs:/etc/security/keytabs:ro
       - yarn-demo-data:/app/data

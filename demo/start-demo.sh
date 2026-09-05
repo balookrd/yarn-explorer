@@ -1,15 +1,18 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 echo "=== Запуск демонстрационного стенда YARN Explorer ==="
 echo "Компоненты: KDC (Kerberos), OpenLDAP, 2x Kerberized YARN RM, Yarn-Explorer"
 
-docker compose -f docker-compose.demo.yml up --build -d
+docker compose up --build -d
 
 echo ""
 echo "=== Ожидание инициализации сервисов... ==="
 sleep 5
-docker compose -f docker-compose.demo.yml ps
+docker compose ps
 
 echo ""
 echo "Стенд успешно запущен!"
