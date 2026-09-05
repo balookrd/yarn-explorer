@@ -161,3 +161,19 @@ graph TD
   ```bash
   docker exec yarn-demo-explorer curl -s --negotiate -u : "http://yarn-rm-1.yarn-demo-net:8088/ws/v1/cluster/scheduler"
   ```
+
+- **Проверка Health Probe эндпоинта**:
+  ```bash
+  curl -s http://localhost:8003/health
+  # Ожидаемый ответ: {"status":"ok"}
+  ```
+
+---
+
+## 📚 Связанная документация
+
+- [README.md](README.md) — Главная документация проекта и архитектура решения.
+- [backend/README.md](backend/README.md) — Документация REST API и бэкенда.
+- [frontend/README.md](frontend/README.md) — Архитектура компонентов Svelte 5.
+- [helm/yarn-explorer/README.md](helm/yarn-explorer/README.md) — Развертывание в Kubernetes.
+

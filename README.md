@@ -4,9 +4,36 @@
 
 ---
 
+## 📑 Содержание
+
+- [Ключевые возможности](#-ключевые-возможности)
+- [Архитектура решения](#-архитектура-решения)
+- [Быстрый старт: Демо-стенд в Docker](#-быстрый-старт-демонстрационный-стенд-в-docker)
+- [Тестовые учетные записи LDAP](#-тестовые-учетные-записи-ldap)
+- [Локальная разработка](#-локальная-разработка)
+- [Конфигурация (`config.yaml`)](#️-конфигурация-configyaml)
+- [Развертывание в Kubernetes (Helm)](#️-развертывание-в-kubernetes-helm)
+- [Тестирование](#-тестирование)
+- [Структура проекта](#-структура-проекта)
+- [Специализированная документация](#-дополнительная-документация)
+
+---
+
+## 📚 Дополнительная документация
+
+| Документ | Содержание |
+|---|---|
+| 🎪 **[DEMO.md](DEMO.md)** | Подробное руководство по керберизированному демонстрационному стенду и 6 пошаговых сценариев работы |
+| ☸️ **[helm/yarn-explorer/README.md](helm/yarn-explorer/README.md)** | Описание параметров `values.yaml` и инструкция по Helm-деплою в Kubernetes |
+| ⚙️ **[backend/README.md](backend/README.md)** | Спецификация REST API, архитектура бэкенда (FastAPI), модели и запуск тестов |
+| 🎨 **[frontend/README.md](frontend/README.md)** | Описание архитектуры клиентской части на Svelte 5 (Runes), компонентов и сборки |
+
+---
+
 ## 🚀 Ключевые возможности
 
 ### 1. Мультикластерность и безопасность
+
 - **Поддержка множества кластеров**: единая точка управления для Production, Analytics, ML и других YARN-кластеров с переключением в реальном времени.
 - **Kerberos & SPNEGO**: аутентификация запросов к YARN ResourceManager REST API через защищенный Kerberos SPNEGO (с поддержкой keytab и `krb5.conf`).
 - **Корпоративный RBAC & LDAP**:
@@ -382,23 +409,25 @@ npm run check
 
 ```
 yarn-explorer/
-├── backend/
+├── backend/                     # Бэкенд FastAPI (см. backend/README.md)
 │   ├── app/
-│   │   ├── api/                 # REST API роутеры (auth, clusters, queues)
-│   │   ├── core/                # Конфигурация, безопасность, токены
-│   │   ├── models/              # Pydantic модели (QueueNode, Cluster, Balance)
+│   │   ├── api/                 # REST API роутеры (auth, clusters, queues, change_requests)
+│   │   ├── core/                # Конфигурация, безопасность, токены, база SQLite
+│   │   ├── models/              # Pydantic модели (QueueNode, Cluster, Balance, ChangeRequest)
 │   │   └── services/            # Бизнес-логика (YarnClient, CapacityScheduler, XmlGenerator)
 │   ├── tests/                   # Юнит-тесты на pytest
-│   └── requirements.txt         # Зависимости Python
-├── frontend/
+│   ├── requirements.txt         # Зависимости Python
+│   └── README.md                # Документация бэкенда и REST API
+├── frontend/                    # Фронтенд Svelte 5 (см. frontend/README.md)
 │   ├── src/
-│   │   ├── components/          # Svelte-компоненты (таблица, drawer, модалки, QueueMappingsModal)
+│   │   ├── components/          # Svelte-компоненты (таблица, drawer, модалки, QueueMappings, Diff)
 │   │   ├── utils/               # Утилиты форматирования RAM и vCPU
 │   │   ├── api/                 # Клиентский HTTP-сервис
 │   │   ├── App.svelte           # Корневой компонент приложения
 │   │   └── types.ts             # TypeScript интерфейсы
 │   ├── package.json             # Зависимости и скрипты сборки
-│   └── vite.config.ts           # Конфигурация сборщика Vite
+│   ├── vite.config.ts           # Конфигурация сборщика Vite
+│   └── README.md                # Документация фронтенда и компонентов
 ├── demo/                        # Полный демонстрационный стенд (Kerberos KDC, OpenLDAP, 2x Hadoop RM)
 │   ├── docker-compose.yml       # Спецификация сервисов демо-стенда
 │   ├── start-demo.sh            # Скрипт быстрого запуска стенда
@@ -407,14 +436,17 @@ yarn-explorer/
 │   ├── cluster-2/               # Hadoop RM 2 конфигурации (Analytics & ML)
 │   ├── kdc/                     # Kerberos KDC Dockerfile и скрипт инициализации
 │   ├── ldap/                    # OpenLDAP конфигурация и пользователи
-│   └── config.yaml              # Конфиг YARN Explorer для демо-стенда
+│   ├── config.yaml              # Конфиг YARN Explorer для демо-стенда
+│   └── README.md                # Ссылка на руководство DEMO.md
 ├── helm/yarn-explorer/          # Production-ready Helm-чарт для развертывания в Kubernetes
 │   ├── Chart.yaml               # Описание и метаданные чарта
 │   ├── values.yaml              # Параметры по умолчанию (resources, ingress, kerberos, db)
-│   └── templates/               # Манифесты K8s (Deployment, Service, Ingress, PVC, ConfigMap, Secret)
+│   ├── templates/               # Манифесты K8s (Deployment, Service, Ingress, PVC, ConfigMap, Secret)
+│   └── README.md                # Документация чарта и таблица параметров
 ├── Dockerfile                   # Production Dockerfile YARN Explorer
 ├── DEMO.md                      # Подробное руководство по демонстрационному стенду
-└── README.md
+└── README.md                    # Главная документация проекта
+
 
 
 ```
