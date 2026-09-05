@@ -14,6 +14,7 @@
     isOpen = $bindable(),
     onApplyToDraft,
     onViewXml,
+    onStatusChange,
   }: {
     clusterId: string;
     canAdmin: boolean;
@@ -21,6 +22,7 @@
     isOpen: boolean;
     onApplyToDraft: (changes: DraftQueueItem[]) => void;
     onViewXml: (xml: string, title: string) => void;
+    onStatusChange?: () => void;
   } = $props();
 
   let requests = $state<ChangeRequestSummary[]>([]);
@@ -56,6 +58,7 @@
       } else if (requests.length > 0) {
         await selectRequest(requests[0].id);
       }
+      onStatusChange?.();
     } catch (err: any) {
       errorMessage = err.message || 'Ошибка загрузки заявок';
     } finally {
@@ -85,6 +88,7 @@
       const updated = await api.approveChangeRequest(selectedId, reviewComment);
       selectedDetail = updated;
       await loadRequests();
+      onStatusChange?.();
     } catch (err: any) {
       errorMessage = err.message || 'Ошибка при одобрении заявки';
     } finally {
@@ -100,6 +104,7 @@
       const updated = await api.rejectChangeRequest(selectedId, reviewComment);
       selectedDetail = updated;
       await loadRequests();
+      onStatusChange?.();
     } catch (err: any) {
       errorMessage = err.message || 'Ошибка при отклонении заявки';
     } finally {
@@ -115,6 +120,7 @@
       const updated = await api.cancelChangeRequest(selectedId);
       selectedDetail = updated;
       await loadRequests();
+      onStatusChange?.();
     } catch (err: any) {
       errorMessage = err.message || 'Ошибка при отзыве заявки';
     } finally {

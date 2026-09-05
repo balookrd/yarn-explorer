@@ -373,6 +373,15 @@
     xmlInstructions = `XML сгенерирован для заявки: ${title}\n1. Скопируйте файл в /etc/hadoop/conf/capacity-scheduler.xml\n2. Выполните: yarn rmadmin -refreshQueues`;
     showXmlModal = true;
   }
+
+  // Периодическое автообновление счетчика заявок для администратора
+  $effect(() => {
+    if (user && selectedClusterId) {
+      loadPendingCrCount();
+      const interval = setInterval(loadPendingCrCount, 10000);
+      return () => clearInterval(interval);
+    }
+  });
 </script>
 
 <div class="h-screen w-screen flex flex-col overflow-hidden">
@@ -554,6 +563,7 @@
       bind:isOpen={showCrDrawer}
       onApplyToDraft={handleApplyCrToDraft}
       onViewXml={handleViewCrXml}
+      onStatusChange={loadPendingCrCount}
     />
   {/if}
 </div>
