@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  yarn-explorer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: yarn-explorer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - CONFIG_PATH=/app/config/config.yaml
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./config:/app/config:ro
+      # При необходимости пробросить Kerberos:
+      # - /etc/krb5.conf:/etc/krb5.conf:ro
+      # - /etc/security/keytabs:/etc/security/keytabs:ro

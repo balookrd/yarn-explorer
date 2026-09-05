@@ -1,0 +1,103 @@
+import os
+import yaml
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
+
+from app.models.cluster import ClusterConfig
+from app.models.auth import Role
+
+
+class ServerConfig(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = 8080
+    debug: bool = True
+
+
+class MockUserConfig(BaseModel):
+    username: str
+    password: str
+    display_name: str
+    email: Optional[str] = None
+    groups: List[str] = Field(default_factory=list)
+
+
+class LdapConfig(BaseModel):
+    enabled: bool = False
+    server_uri: str = "ldaps://localhost:636"
+    use_ssl: bool = True
+    bind_dn: str = ""
+    bind_password: str = ""
+    user_base_dn: str = ""
+    user_filter: str = "(&(objectClass=user)(sAMAccountName={username}))"
+    user_display_name_attr: str = "displayName"
+    user_email_attr: str = "mail"
+    group_base_dn: str = ""
+    group_filter: str = "(&(objectClass=group)(member={user_dn}))"
+    group_name_attr: str = "cn"
+    ca_cert_file: Optional[str] = None
+
+
+class KerberosConfig(BaseModel):
+    enabled: bool = False
+    keytab_file: Optional[str] = None
+    service_principal: Optional[str] = None
+
+
+class JwtConfig(BaseModel):
+    secret_key: str = "default-secret-key-change-it"
+    algorithm: str = "HS256"
+    expire_minutes: int = 480
+
+
+class AuthConfig(BaseModel):
+    mode: str = "mock"  # mock | ldaps_only | kerberos_only | hybrid
+    mock_users: List[MockUserConfig] = Field(default_factory=list)
+    ldap: LdapConfig = Field(default_factory=LdapConfig)
+    kerberos: KerberosConfig = Field(default_factory=KerberosConfig)
+    jwt: JwtConfig = Field(default_factory=JwtConfig)
+
+
+class RoleMapping(BaseModel):
+    users: List[str] = Field(default_factory=list)
+    groups: List[str] = Field(default_factory=list)
+
+
+class GlobalRoles(BaseModel):
+    admin: RoleMapping = Field(default_factory=RoleMapping)
+    writer: RoleMapping = Field(default_factory=RoleMapping)
+    reader: RoleMapping = Field(default_factory=lambda: RoleMapping(users=["*"], groups=["*"]))
+
+
+class UiAccessAcl(BaseModel):
+    allowed_users: List[str] = Field(default_factory=lambda: ["*"])
+    allowed_groups: List[str] = Field(default_factory=lambda: ["*"])
+
+
+class AclConfig(BaseModel):
+    ui_access: UiAccessAcl = Field(default_factory=UiAccessAcl)
+    roles: GlobalRoles = Field(default_factory=GlobalRoles)
+
+
+class Settings(BaseSettings):
+    server: ServerConfig = Field(default_factory=ServerConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
+    acl: AclConfig = Field(default_factory=AclConfig)
+    clusters: List[ClusterConfig] = Field(default_factory=list)
+
+    @classmethod
+    def load_from_yaml(cls, path: str = "config/config.yaml") -> "Settings":
+        if not os.path.exists(path):
+            # Пробуем искать относительно родительского каталога
+            parent_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", path)
+            if os.path.exists(parent_path):
+                path = parent_path
+
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+                return cls(**data)
+        return cls()
+
+
+settings = Settings.load_from_yaml()
