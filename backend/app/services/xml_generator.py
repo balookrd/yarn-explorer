@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict
+from typing import List, Dict, Optional
 from datetime import datetime, timezone
 from collections import defaultdict
 from xml.sax.saxutils import escape
@@ -15,12 +15,14 @@ def generate_capacity_scheduler_xml(
     cluster: ClusterConfig,
     generated_by: str = "system",
     comment: str = "",
+    resource_mode: Optional[str] = None,
 ) -> str:
     """
     Генерирует capacity-scheduler.xml из списка QueueDraftItem.
-    Формат: стандартный Hadoop XML configuration.
+    Поддерживает процентный и абсолютный режимы ресурсов ([memory=...,vcores=...]).
     """
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    mode = resource_mode or cluster.resource_mode
 
     # Индексируем очереди по пути и строим дерево
     queue_map: Dict[str, QueueDraftItem] = {}
@@ -36,7 +38,6 @@ def generate_capacity_scheduler_xml(
 
     properties: List[tuple] = []
 
-    # yarn.scheduler.capacity.root.queues
     def add_prop(name: str, value: str, description: str = ""):
         properties.append((name, value, description))
 
@@ -46,6 +47,9 @@ def generate_capacity_scheduler_xml(
         "10000",
         "Maximum number of applications in the system"
     )
+
+    total_mem = cluster.total_resources.memory_mb
+    total_cores = cluster.total_resources.vcores
 
     # Обрабатываем каждую очередь
     sorted_paths = sorted(queue_map.keys())
@@ -60,15 +64,26 @@ def generate_capacity_scheduler_xml(
 
         # Для каждой партиции
         for part_name, part_config in q.partitions.items():
+            if mode == "absolute" and path != "root":
+                mem = part_config.memory_mb if part_config.memory_mb is not None else int(total_mem * (part_config.capacity / 100.0))
+                cores = part_config.vcores if part_config.vcores is not None else int(total_cores * (part_config.capacity / 100.0))
+                max_mem = part_config.max_memory_mb if part_config.max_memory_mb is not None else int(total_mem * (part_config.max_capacity / 100.0))
+                max_cores = part_config.max_vcores if part_config.max_vcores is not None else int(total_cores * (part_config.max_capacity / 100.0))
+                cap_str = f"[memory={mem},vcores={cores}]"
+                max_cap_str = f"[memory={max_mem},vcores={max_cores}]"
+            else:
+                cap_str = f"{part_config.capacity}"
+                max_cap_str = f"{part_config.max_capacity}"
+
             if part_name == "DEFAULT" or part_name == cluster.default_partition:
                 # Default partition
-                add_prop(f"{prop_prefix}.capacity", f"{part_config.capacity}")
-                add_prop(f"{prop_prefix}.maximum-capacity", f"{part_config.max_capacity}")
+                add_prop(f"{prop_prefix}.capacity", cap_str)
+                add_prop(f"{prop_prefix}.maximum-capacity", max_cap_str)
             else:
                 # Named partition (Node Label)
                 label_prefix = f"{prop_prefix}.accessible-node-labels.{part_name}"
-                add_prop(f"{label_prefix}.capacity", f"{part_config.capacity}")
-                add_prop(f"{label_prefix}.maximum-capacity", f"{part_config.max_capacity}")
+                add_prop(f"{label_prefix}.capacity", cap_str)
+                add_prop(f"{label_prefix}.maximum-capacity", max_cap_str)
 
         # State
         add_prop(f"{prop_prefix}.state", q.state.value)

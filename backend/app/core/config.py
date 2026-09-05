@@ -86,15 +86,16 @@ class Settings(BaseSettings):
     clusters: List[ClusterConfig] = Field(default_factory=list)
 
     @classmethod
-    def load_from_yaml(cls, path: str = "config/config.yaml") -> "Settings":
-        if not os.path.exists(path):
+    def load_from_yaml(cls, path: Optional[str] = None) -> "Settings":
+        config_path = path or os.environ.get("CONFIG_PATH", "config/config.yaml")
+        if not os.path.exists(config_path):
             # Пробуем искать относительно родительского каталога
-            parent_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", path)
+            parent_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", config_path)
             if os.path.exists(parent_path):
-                path = parent_path
+                config_path = parent_path
 
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
                 return cls(**data)
         return cls()

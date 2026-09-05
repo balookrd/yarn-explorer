@@ -1,47 +1,138 @@
 <script lang="ts">
   import type { DraftQueueItem, PartitionResourceConfig } from '../types';
-  import { X, Plus } from 'lucide-svelte';
+  import { X, Plus, HardDrive, Cpu, Percent, Hash } from 'lucide-svelte';
+  import { formatMemory, formatVcores, mbToGb, gbToMb } from '../utils/resourceUtils';
 
   let {
     parentPath,
     isOpen = $bindable(),
     resourceMode,
+    clusterResources = { memory_mb: 2097152, vcores: 1024 },
     selectedPartition,
     onConfirm,
   }: {
     parentPath: string;
     isOpen: boolean;
     resourceMode: string;
+    clusterResources?: { memory_mb: number; vcores: number };
     selectedPartition: string;
     onConfirm: (draft: DraftQueueItem) => void;
   } = $props();
 
   let queueName = $state('');
+  let inputMode = $state<'percentage' | 'absolute'>('percentage');
+
   let capacity = $state(10);
+  let ramGb = $state(0);
+  let vcores = $state(0);
+
   let maxCapacity = $state(20);
+  let maxRamGb = $state(0);
+  let maxVcores = $state(0);
+
   let queueType = $state<'elastic' | 'fixed'>('elastic');
   let error = $state('');
 
+  const totalMem = $derived(clusterResources?.memory_mb || 2097152);
+  const totalCores = $derived(clusterResources?.vcores || 1024);
+
+  let wasOpen = $state(false);
+
+  function parseVal(val: any, fallback = 0): number {
+    if (val === '' || val === null || val === undefined) return fallback;
+    const n = parseFloat(val);
+    return isNaN(n) ? fallback : n;
+  }
+
+  $effect(() => {
+    if (isOpen && !wasOpen) {
+      wasOpen = true;
+      ramGb = mbToGb(Math.round(totalMem * (capacity / 100)));
+      vcores = Math.round(totalCores * (capacity / 100));
+      maxRamGb = mbToGb(Math.round(totalMem * (maxCapacity / 100)));
+      maxVcores = Math.round(totalCores * (maxCapacity / 100));
+    } else if (!isOpen) {
+      wasOpen = false;
+    }
+  });
+
+  function updateCapacity(val: number) {
+    capacity = val;
+    ramGb = mbToGb(Math.round(totalMem * (val / 100)));
+    vcores = Math.round(totalCores * (val / 100));
+    if (queueType === 'fixed') {
+      maxCapacity = val;
+      maxRamGb = ramGb;
+      maxVcores = vcores;
+    }
+  }
+
+  function updateRamGb(gb: number) {
+    ramGb = gb;
+    const memMb = gbToMb(gb);
+    capacity = totalMem > 0 ? Math.round((memMb / totalMem) * 1000) / 10 : 0;
+    vcores = Math.round(totalCores * (capacity / 100));
+    if (queueType === 'fixed') {
+      maxCapacity = capacity;
+      maxRamGb = ramGb;
+      maxVcores = vcores;
+    }
+  }
+
+  function updateVcores(cores: number) {
+    vcores = cores;
+    capacity = totalCores > 0 ? Math.round((cores / totalCores) * 1000) / 10 : 0;
+    ramGb = mbToGb(Math.round(totalMem * (capacity / 100)));
+    if (queueType === 'fixed') {
+      maxCapacity = capacity;
+      maxRamGb = ramGb;
+      maxVcores = vcores;
+    }
+  }
+
+  function updateMaxCapacity(val: number) {
+    maxCapacity = val;
+    maxRamGb = mbToGb(Math.round(totalMem * (val / 100)));
+    maxVcores = Math.round(totalCores * (val / 100));
+  }
+
+  function updateMaxRamGb(gb: number) {
+    maxRamGb = gb;
+    const memMb = gbToMb(gb);
+    maxCapacity = totalMem > 0 ? Math.round((memMb / totalMem) * 1000) / 10 : 0;
+    maxVcores = Math.round(totalCores * (maxCapacity / 100));
+  }
+
+  function updateMaxVcores(cores: number) {
+    maxVcores = cores;
+    maxCapacity = totalCores > 0 ? Math.round((cores / totalCores) * 1000) / 10 : 0;
+    maxRamGb = mbToGb(Math.round(totalMem * (maxCapacity / 100)));
+  }
+
   function validate(): boolean {
     if (!queueName.trim()) {
-      error = 'Queue name is required';
+      error = 'Имя очереди обязательно';
       return false;
     }
     if (!/^[a-z][a-z0-9_]*$/.test(queueName)) {
-      error = 'Only lowercase letters, digits, underscore. Must start with a letter.';
+      error = 'Только строчные латинские буквы, цифры и символ подчеркивания.';
       return false;
     }
     if (capacity <= 0 || capacity > 100) {
-      error = 'Capacity must be between 0 and 100';
+      error = 'Емкость должна быть от 0 до 100%';
       return false;
     }
     error = '';
     return true;
   }
 
-  function handleTypeChange() {
-    if (queueType === 'fixed') {
+  function handleTypeChange(e: Event) {
+    const val = (e.currentTarget as HTMLSelectElement).value as 'elastic' | 'fixed';
+    queueType = val;
+    if (val === 'fixed') {
       maxCapacity = capacity;
+      maxRamGb = ramGb;
+      maxVcores = vcores;
     }
   }
 
@@ -50,6 +141,8 @@
 
     const actualMaxCap = queueType === 'fixed' ? capacity : maxCapacity;
     const path = `${parentPath}.${queueName}`;
+    const memMb = gbToMb(ramGb);
+    const maxMemMb = gbToMb(maxRamGb);
 
     const part: PartitionResourceConfig = {
       partition_name: selectedPartition,
@@ -57,6 +150,22 @@
       max_capacity: actualMaxCap,
       is_elastic: actualMaxCap > capacity,
       elasticity_ratio: capacity > 0 ? Math.round((actualMaxCap / capacity) * 100) / 100 : 1,
+      memory_mb: memMb,
+      vcores: vcores,
+      max_memory_mb: maxMemMb,
+      max_vcores: maxVcores,
+      memory_percent: capacity,
+      vcore_percent: capacity,
+      max_memory_percent: actualMaxCap,
+      max_vcore_percent: actualMaxCap,
+      absolute_resources: {
+        memory_mb: memMb,
+        vcores: vcores,
+      },
+      absolute_max_resources: {
+        memory_mb: maxMemMb,
+        vcores: maxVcores,
+      }
     };
 
     const draft: DraftQueueItem = {
@@ -82,17 +191,37 @@
 
 {#if isOpen}
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
-    <div class="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md">
-      <div class="flex items-center justify-between mb-5">
-        <h2 class="text-sm font-bold text-slate-900">Add New Queue</h2>
+    <div class="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-lg">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-sm font-bold text-slate-900">Создание новой очереди</h2>
         <button onclick={() => isOpen = false} class="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 cursor-pointer">
           <X class="w-4 h-4 text-slate-500" />
         </button>
       </div>
 
-      <div class="mb-4 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg">
-        <span class="text-[11px] text-slate-500">Parent Queue:</span>
-        <span class="text-xs font-mono font-semibold text-slate-800 ml-1">{parentPath}</span>
+      <div class="mb-4 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg flex justify-between items-center">
+        <div>
+          <span class="text-[11px] text-slate-500">Родительская очередь:</span>
+          <span class="text-xs font-mono font-semibold text-slate-800 ml-1">{parentPath}</span>
+        </div>
+        <div class="flex items-center gap-1 bg-white p-0.5 rounded border border-slate-200">
+          <button
+            onclick={() => inputMode = 'percentage'}
+            class="px-2.5 py-1 rounded text-xs font-semibold cursor-pointer {
+              inputMode === 'percentage' ? 'bg-sky-600 text-white' : 'text-slate-600 hover:text-slate-900'
+            }"
+          >
+            %
+          </button>
+          <button
+            onclick={() => inputMode = 'absolute'}
+            class="px-2.5 py-1 rounded text-xs font-semibold cursor-pointer {
+              inputMode === 'absolute' ? 'bg-sky-600 text-white' : 'text-slate-600 hover:text-slate-900'
+            }"
+          >
+            GB / Cores
+          </button>
+        </div>
       </div>
 
       {#if error}
@@ -101,56 +230,131 @@
 
       <div class="space-y-4">
         <div>
-          <label for="new-queue-name" class="block text-xs font-semibold text-slate-700 mb-1.5">Queue Name</label>
+          <label for="new-queue-name" class="block text-xs font-semibold text-slate-700 mb-1">Имя очереди</label>
           <input
             id="new-queue-name"
             type="text"
             bind:value={queueName}
-            placeholder="my_new_queue"
-            class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 font-mono"
-          />
-          <p class="text-[10px] text-slate-400 mt-1">Lowercase letters, digits, underscore only</p>
-        </div>
-
-        <div>
-          <label for="new-queue-capacity" class="block text-xs font-semibold text-slate-700 mb-1.5">Capacity (%)</label>
-          <input
-            id="new-queue-capacity"
-            type="number"
-            bind:value={capacity}
-            oninput={handleTypeChange}
-            min="0"
-            max="100"
-            step="0.1"
-            class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm font-mono outline-none focus:border-sky-500"
+            placeholder="analytics_batch"
+            class="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 outline-none focus:border-sky-500 font-mono"
           />
         </div>
 
+        <!-- Guaranteed capacity -->
+        <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+          <div class="flex justify-between items-center text-xs font-semibold text-slate-800">
+            <span>Гарантированная емкость (Capacity)</span>
+            <span class="text-[11px] font-mono text-slate-500">
+              {ramGb.toFixed(1)} GB / {vcores} Cores ({capacity.toFixed(1)}%)
+            </span>
+          </div>
+
+          {#if inputMode === 'percentage'}
+            <div class="relative">
+              <input
+                type="number"
+                value={capacity}
+                oninput={(e) => updateCapacity(parseVal(e.currentTarget.value, 0))}
+                min="0.1"
+                max="100"
+                step="0.1"
+                class="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-sm font-mono outline-none focus:border-sky-500"
+              />
+              <span class="absolute right-3 top-2 text-xs font-bold text-slate-400">%</span>
+            </div>
+          {:else}
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label for="new-ram-gb" class="block text-[11px] text-slate-500 mb-0.5">RAM (GB)</label>
+                <input
+                  id="new-ram-gb"
+                  type="number"
+                  value={ramGb}
+                  oninput={(e) => updateRamGb(parseVal(e.currentTarget.value, 0))}
+                  min="1"
+                  step="1"
+                  class="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-sm font-mono outline-none focus:border-sky-500"
+                />
+              </div>
+              <div>
+                <label for="new-vcores" class="block text-[11px] text-slate-500 mb-0.5">vCPU (Cores)</label>
+                <input
+                  id="new-vcores"
+                  type="number"
+                  value={vcores}
+                  oninput={(e) => updateVcores(parseVal(e.currentTarget.value, 0))}
+                  min="1"
+                  step="1"
+                  class="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-sm font-mono outline-none focus:border-sky-500"
+                />
+              </div>
+            </div>
+          {/if}
+        </div>
+
         <div>
-          <label for="new-queue-type" class="block text-xs font-semibold text-slate-700 mb-1.5">Type</label>
+          <label for="new-queue-type" class="block text-xs font-semibold text-slate-700 mb-1">Режим эластичности</label>
           <select
             id="new-queue-type"
-            bind:value={queueType}
+            value={queueType}
             onchange={handleTypeChange}
-            class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none cursor-pointer"
+            class="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm outline-none cursor-pointer"
           >
-            <option value="elastic">Elastic</option>
-            <option value="fixed">Fixed</option>
+            <option value="elastic">Elastic (разрешить овербукинг)</option>
+            <option value="fixed">Fixed (строго по capacity)</option>
           </select>
         </div>
 
         {#if queueType === 'elastic'}
-          <div>
-            <label for="new-queue-max-capacity" class="block text-xs font-semibold text-slate-700 mb-1.5">Max Capacity (%)</label>
-            <input
-              id="new-queue-max-capacity"
-              type="number"
-              bind:value={maxCapacity}
-              min={capacity}
-              max="100"
-              step="0.1"
-              class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-sm font-mono outline-none focus:border-sky-500"
-            />
+          <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+            <div class="flex justify-between items-center text-xs font-semibold text-slate-800">
+              <span>Максимальный лимит (Max Capacity)</span>
+              <span class="text-[11px] font-mono text-slate-500">
+                {maxRamGb.toFixed(1)} GB / {maxVcores} Cores ({maxCapacity.toFixed(1)}%)
+              </span>
+            </div>
+
+            {#if inputMode === 'percentage'}
+              <div class="relative">
+                <input
+                  type="number"
+                  value={maxCapacity}
+                  oninput={(e) => updateMaxCapacity(parseVal(e.currentTarget.value, 0))}
+                  min={capacity}
+                  max="100"
+                  step="0.1"
+                  class="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-sm font-mono outline-none focus:border-sky-500"
+                />
+                <span class="absolute right-3 top-2 text-xs font-bold text-slate-400">%</span>
+              </div>
+            {:else}
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label for="new-max-ram-gb" class="block text-[11px] text-slate-500 mb-0.5">Max RAM (GB)</label>
+                  <input
+                    id="new-max-ram-gb"
+                    type="number"
+                    value={maxRamGb}
+                    oninput={(e) => updateMaxRamGb(parseVal(e.currentTarget.value, 0))}
+                    min={ramGb}
+                    step="1"
+                    class="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-sm font-mono outline-none focus:border-sky-500"
+                  />
+                </div>
+                <div>
+                  <label for="new-max-vcores" class="block text-[11px] text-slate-500 mb-0.5">Max vCPU (Cores)</label>
+                  <input
+                    id="new-max-vcores"
+                    type="number"
+                    value={maxVcores}
+                    oninput={(e) => updateMaxVcores(parseVal(e.currentTarget.value, 0))}
+                    min={vcores}
+                    step="1"
+                    class="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-sm font-mono outline-none focus:border-sky-500"
+                  />
+                </div>
+              </div>
+            {/if}
           </div>
         {/if}
       </div>
@@ -158,12 +362,12 @@
       <div class="flex items-center gap-2 mt-6">
         <button onclick={() => isOpen = false}
           class="flex-1 py-2 rounded-lg border border-slate-200 text-slate-700 text-xs font-medium hover:bg-slate-50 transition cursor-pointer">
-          Cancel
+          Отмена
         </button>
         <button onclick={handleSubmit}
           class="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-gradient-to-r from-sky-600 to-indigo-600 text-white text-xs font-semibold shadow-md cursor-pointer">
           <Plus class="w-3.5 h-3.5" />
-          Create Queue
+          Создать очередь
         </button>
       </div>
     </div>

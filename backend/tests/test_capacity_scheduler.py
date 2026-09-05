@@ -147,3 +147,12 @@ class TestXmlGenerator:
         for prop in props:
             assert prop.find("name") is not None
             assert prop.find("value") is not None
+
+    def test_xml_generation_absolute(self):
+        cluster = self._make_cluster()
+        queues = [
+            _make_queue("prod", "root", 60.0, 90.0),
+        ]
+        xml = generate_capacity_scheduler_xml(queues, cluster, resource_mode="absolute")
+        assert "[memory=" in xml
+        assert "vcores=" in xml

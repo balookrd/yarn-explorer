@@ -36,19 +36,31 @@ def get_mock_queue_tree(cluster: ClusterConfig) -> QueueNode:
     partitions = cluster.partitions
 
     def make_part(cap: float, max_cap: float) -> PartitionResourceConfig:
+        mem = int(total_mem * (cap / 100.0))
+        cores = int(total_cores * (cap / 100.0))
+        max_mem = int(total_mem * (max_cap / 100.0))
+        max_c = int(total_cores * (max_cap / 100.0))
         return PartitionResourceConfig(
             partition_name="DEFAULT",
             capacity=cap,
             max_capacity=max_cap,
             is_elastic=max_cap > cap,
             elasticity_ratio=round(max_cap / cap, 2) if cap > 0 else 1.0,
+            memory_mb=mem,
+            vcores=cores,
+            max_memory_mb=max_mem,
+            max_vcores=max_c,
+            memory_percent=cap,
+            vcore_percent=cap,
+            max_memory_percent=max_cap,
+            max_vcore_percent=max_cap,
             absolute_resources=ResourceAllocation(
-                memory_mb=int(total_mem * (cap / 100.0)),
-                vcores=int(total_cores * (cap / 100.0))
+                memory_mb=mem,
+                vcores=cores
             ),
             absolute_max_resources=ResourceAllocation(
-                memory_mb=int(total_mem * (max_cap / 100.0)),
-                vcores=int(total_cores * (max_cap / 100.0))
+                memory_mb=max_mem,
+                vcores=max_c
             )
         )
 
@@ -56,8 +68,19 @@ def get_mock_queue_tree(cluster: ClusterConfig) -> QueueNode:
     spark_parts = {"DEFAULT": make_part(40.0, 80.0)}
     if "GPU" in partitions:
         spark_parts["GPU"] = PartitionResourceConfig(
-            partition_name="GPU", capacity=60.0, max_capacity=100.0,
-            is_elastic=True, elasticity_ratio=1.67
+            partition_name="GPU",
+            capacity=60.0,
+            max_capacity=100.0,
+            is_elastic=True,
+            elasticity_ratio=1.67,
+            memory_mb=int(total_mem * 0.6),
+            vcores=int(total_cores * 0.6),
+            max_memory_mb=total_mem,
+            max_vcores=total_cores,
+            memory_percent=60.0,
+            vcore_percent=60.0,
+            max_memory_percent=100.0,
+            max_vcore_percent=100.0,
         )
 
     spark_queue = QueueNode(

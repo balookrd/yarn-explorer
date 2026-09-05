@@ -16,10 +16,8 @@ def validate_queue_balance(
     """
     Валидирует баланс очередей:
     - В процентном режиме: сумма capacity дочерних = 100% от родителя.
-    - В абсолютном режиме: сумма ресурсов не превышает родителя.
-    Возвращает список BranchBalance для каждой ветки (parent queue).
+    - Раздельный учет RAM и vCPU.
     """
-    # Группируем очереди по parent_path
     children_by_parent: Dict[str, List[QueueDraftItem]] = defaultdict(list)
     for q in queues:
         if q.action == "delete":
@@ -31,14 +29,25 @@ def validate_queue_balance(
 
     for parent_path, children in children_by_parent.items():
         total_cap = 0.0
+        total_mem = 0
+        total_vcores = 0
+        has_mem = False
+        has_vcores = False
+
         for child in children:
             part_config = child.partitions.get(partition)
             if part_config:
                 total_cap += part_config.capacity
+                if part_config.memory_mb is not None:
+                    total_mem += part_config.memory_mb
+                    has_mem = True
+                if part_config.vcores is not None:
+                    total_vcores += part_config.vcores
+                    has_vcores = True
 
-        expected = 100.0  # Для процентного режима
+        expected = 100.0
         unallocated = expected - total_cap
-        tolerance = 0.01  # Допуск для floating point
+        tolerance = 0.01
 
         if abs(unallocated) <= tolerance:
             status = "ok"
@@ -61,6 +70,10 @@ def validate_queue_balance(
             is_balanced=is_balanced,
             status=status,
             message=message,
+            total_children_memory_mb=total_mem if has_mem else None,
+            total_children_vcores=total_vcores if has_vcores else None,
+            ram_is_balanced=is_balanced,
+            vcpu_is_balanced=is_balanced,
         ))
 
     return balances
@@ -75,10 +88,21 @@ def compute_balances_from_tree(root_queue, partition: str) -> List[BranchBalance
     def recurse(node):
         if node.children:
             total_cap = 0.0
+            total_mem = 0
+            total_vcores = 0
+            has_mem = False
+            has_vcores = False
+
             for child in node.children:
                 part_config = child.partitions.get(partition)
                 if part_config:
                     total_cap += part_config.capacity
+                    if part_config.memory_mb is not None:
+                        total_mem += part_config.memory_mb
+                        has_mem = True
+                    if part_config.vcores is not None:
+                        total_vcores += part_config.vcores
+                        has_vcores = True
 
             unallocated = 100.0 - total_cap
             tolerance = 0.01
@@ -104,6 +128,10 @@ def compute_balances_from_tree(root_queue, partition: str) -> List[BranchBalance
                 is_balanced=is_balanced,
                 status=status,
                 message=message,
+                total_children_memory_mb=total_mem if has_mem else None,
+                total_children_vcores=total_vcores if has_vcores else None,
+                ram_is_balanced=is_balanced,
+                vcpu_is_balanced=is_balanced,
             ))
 
             for child in node.children:

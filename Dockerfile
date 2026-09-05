@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libkrb5-dev \
     krb5-user \
+    ldap-utils \
     curl \
     && rm -rf /var/lib/apt/lists/*
 

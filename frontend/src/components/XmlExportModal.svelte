@@ -1,16 +1,20 @@
 <script lang="ts">
-  import { X, Download, Copy, CheckCircle } from 'lucide-svelte';
+  import { X, Download, Copy, CheckCircle, Percent, Hash } from 'lucide-svelte';
 
   let {
     xmlContent,
     filename,
     instructions,
+    currentMode = 'percentage',
     isOpen = $bindable(),
+    onModeChange,
   }: {
     xmlContent: string;
     filename: string;
     instructions: string;
+    currentMode?: 'percentage' | 'absolute';
     isOpen: boolean;
+    onModeChange?: (mode: 'percentage' | 'absolute') => void;
   } = $props();
 
   let copied = $state(false);
@@ -38,7 +42,31 @@
       <!-- Header -->
       <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200">
         <div>
-          <h2 class="text-sm font-bold text-slate-900">Generated capacity-scheduler.xml</h2>
+          <div class="flex items-center gap-3">
+            <h2 class="text-sm font-bold text-slate-900">Сгенерированный capacity-scheduler.xml</h2>
+            {#if onModeChange}
+              <div class="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                <button
+                  onclick={() => onModeChange('percentage')}
+                  class="flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-semibold cursor-pointer {
+                    currentMode === 'percentage' ? 'bg-white text-sky-700 shadow-xs' : 'text-slate-600'
+                  }"
+                >
+                  <Percent class="w-3 h-3" />
+                  <span>Проценты (%)</span>
+                </button>
+                <button
+                  onclick={() => onModeChange('absolute')}
+                  class="flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-semibold cursor-pointer {
+                    currentMode === 'absolute' ? 'bg-white text-sky-700 shadow-xs' : 'text-slate-600'
+                  }"
+                >
+                  <Hash class="w-3 h-3" />
+                  <span>Абсолютные [memory,vcores]</span>
+                </button>
+              </div>
+            {/if}
+          </div>
           <p class="text-[11px] text-slate-500 font-mono mt-0.5">{filename}</p>
         </div>
         <div class="flex items-center gap-2">
@@ -46,16 +74,16 @@
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-medium hover:bg-slate-50 transition cursor-pointer {copied ? 'text-emerald-600 border-emerald-300' : 'text-slate-700'}">
             {#if copied}
               <CheckCircle class="w-3.5 h-3.5" />
-              Copied!
+              Скопировано!
             {:else}
               <Copy class="w-3.5 h-3.5" />
-              Copy
+              Копировать
             {/if}
           </button>
           <button onclick={downloadXml}
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-sky-600 to-indigo-600 text-white text-xs font-semibold shadow-sm cursor-pointer">
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-sky-600 to-indigo-600 text-white text-xs font-semibold shadow-sm cursor-pointer hover:shadow-md transition">
             <Download class="w-3.5 h-3.5" />
-            Download
+            Скачать XML
           </button>
           <button onclick={() => isOpen = false} class="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 cursor-pointer">
             <X class="w-4 h-4 text-slate-500" />
@@ -70,7 +98,7 @@
 
       <!-- Instructions -->
       <div class="px-6 py-3 border-t border-slate-200 bg-amber-50">
-        <div class="text-[11px] font-semibold text-amber-800 mb-1">Deployment Instructions:</div>
+        <div class="text-[11px] font-semibold text-amber-800 mb-1">Инструкция по применению на кластере:</div>
         <pre class="text-[11px] text-amber-700 font-mono whitespace-pre-wrap">{instructions}</pre>
       </div>
     </div>

@@ -89,7 +89,7 @@ export const api = {
     );
   },
 
-  async generateXml(clusterId: string, queues: DraftQueueItem[], comment?: string) {
+  async generateXml(clusterId: string, queues: DraftQueueItem[], comment?: string, resourceModeOverride?: string) {
     return request<{
       cluster_id: string; filename: string; xml_content: string;
       applied_by: string; generated_at: string; instructions: string;
@@ -97,7 +97,12 @@ export const api = {
       `/clusters/${clusterId}/generate-xml`,
       {
         method: 'POST',
-        body: JSON.stringify({ cluster_id: clusterId, queues, proposal_comment: comment }),
+        body: JSON.stringify({
+          cluster_id: clusterId,
+          queues,
+          proposal_comment: comment,
+          resource_mode_override: resourceModeOverride,
+        }),
       }
     );
   },

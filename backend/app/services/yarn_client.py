@@ -11,15 +11,52 @@ from app.models.yarn import (
 logger = logging.getLogger(__name__)
 
 
+import asyncio
+import requests
+from requests_kerberos import HTTPKerberosAuth, OPTIONAL
+from app.core.kerberos import kerberos_manager
+
+_kerberos_session: Optional[requests.Session] = None
+
+def _get_kerberos_session() -> requests.Session:
+    global _kerberos_session
+    if _kerberos_session is None:
+        _kerberos_session = requests.Session()
+        _kerberos_session.auth = HTTPKerberosAuth(
+            mutual_authentication=OPTIONAL,
+            sanitize_mutual_error_response=False
+        )
+    return _kerberos_session
+
+
 class YarnClient:
     """
     Асинхронный клиент к YARN ResourceManager REST API.
-    Поддерживает RM HA Failover и имперсонацию (doAs).
+    Поддерживает RM HA Failover, имперсонацию (doAs) и Kerberos SPNEGO аутентификацию.
     """
 
     def __init__(self, cluster: ClusterConfig):
         self.cluster = cluster
         self._active_rm_url: Optional[str] = None
+
+    def _execute_kerberos_get(self, url: str, params: dict) -> dict:
+        """Синхронный GET запрос с SPNEGO аутентификацией и сессионными cookies."""
+        kerberos_manager.ensure_service_ticket()
+        session = _get_kerberos_session()
+        resp = session.get(url, params=params, timeout=15.0)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def _http_get(self, url: str, params: Optional[dict] = None) -> dict:
+        """Выполняет GET запрос (с Kerberos или без в зависимости от конфигурации)."""
+        params = params or {}
+        if self.cluster.kerberos_enabled:
+            return await asyncio.to_thread(self._execute_kerberos_get, url, params)
+        else:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(url, params=params)
+                resp.raise_for_status()
+                return resp.json()
 
     async def _get_active_rm(self) -> str:
         """Определяет активный ResourceManager из списка URL."""
@@ -28,15 +65,12 @@ class YarnClient:
 
         for url in self.cluster.resource_manager_urls:
             try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    resp = await client.get(f"{url}/ws/v1/cluster/info")
-                    if resp.status_code == 200:
-                        info = resp.json()
-                        ha_state = info.get("clusterInfo", {}).get("haState", "ACTIVE")
-                        if ha_state == "ACTIVE":
-                            self._active_rm_url = url
-                            logger.info(f"Активный RM: {url}")
-                            return url
+                info = await self._http_get(f"{url}/ws/v1/cluster/info")
+                ha_state = info.get("clusterInfo", {}).get("haState", "ACTIVE")
+                if ha_state == "ACTIVE":
+                    self._active_rm_url = url
+                    logger.info(f"Активный RM: {url}")
+                    return url
             except Exception as e:
                 logger.warning(f"RM {url} недоступен: {e}")
                 continue
@@ -62,11 +96,8 @@ class YarnClient:
         for attempt in range(len(self.cluster.resource_manager_urls)):
             rm_url = await self._get_active_rm()
             try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    url = f"{rm_url}{path}"
-                    resp = await client.get(url, params=params)
-                    resp.raise_for_status()
-                    return resp.json()
+                url = f"{rm_url}{path}"
+                return await self._http_get(url, params=params)
             except Exception as e:
                 logger.warning(f"Ошибка запроса к {rm_url}{path}: {e}")
                 last_error = e
@@ -111,20 +142,43 @@ class YarnClient:
         name = queue_json.get("queueName", "")
         path = f"{parent_path}.{name}" if parent_path else name
 
+        total_mem = self.cluster.total_resources.memory_mb
+        total_vcores = self.cluster.total_resources.vcores
+
         # Партиции
         partitions = {}
-        cap = queue_json.get("capacity", 0.0)
-        max_cap = queue_json.get("maxCapacity", 100.0)
+        cap = float(queue_json.get("capacity", 0.0))
+        max_cap = float(queue_json.get("maxCapacity", 100.0))
+        abs_cap = float(queue_json.get("absoluteCapacity", cap))
+        abs_max_cap = float(queue_json.get("absoluteMaxCapacity", max_cap))
         is_elastic = max_cap > cap
+
+        mem_mb = int(round(total_mem * (abs_cap / 100.0)))
+        cores = int(round(total_vcores * (abs_cap / 100.0)))
+        max_mem_mb = int(round(total_mem * (abs_max_cap / 100.0)))
+        max_cores = int(round(total_vcores * (abs_max_cap / 100.0)))
+
         partitions["DEFAULT"] = PartitionResourceConfig(
             partition_name="DEFAULT",
-            capacity=cap,
-            max_capacity=max_cap,
+            capacity=round(cap, 2),
+            max_capacity=round(max_cap, 2),
             is_elastic=is_elastic,
             elasticity_ratio=round(max_cap / cap, 2) if cap > 0 else 1.0,
+            memory_mb=mem_mb,
+            vcores=cores,
+            max_memory_mb=max_mem_mb,
+            max_vcores=max_cores,
+            memory_percent=round(cap, 2),
+            vcore_percent=round(cap, 2),
+            max_memory_percent=round(max_cap, 2),
+            max_vcore_percent=round(max_cap, 2),
             absolute_resources=ResourceAllocation(
                 memory_mb=int(queue_json.get("resourcesUsed", {}).get("memory", 0)),
                 vcores=int(queue_json.get("resourcesUsed", {}).get("vCores", 0))
+            ),
+            absolute_max_resources=ResourceAllocation(
+                memory_mb=max_mem_mb,
+                vcores=max_cores
             )
         )
 
@@ -133,14 +187,24 @@ class YarnClient:
         for part_info in capacities:
             part_name = part_info.get("partitionName", "")
             if part_name and part_name != "":
-                p_cap = part_info.get("capacity", 0.0)
-                p_max = part_info.get("maxCapacity", 100.0)
+                p_cap = float(part_info.get("capacity", 0.0))
+                p_max = float(part_info.get("maxCapacity", 100.0))
+                p_abs_cap = float(part_info.get("absoluteCapacity", p_cap))
+                p_abs_max = float(part_info.get("absoluteMaxCapacity", p_max))
                 partitions[part_name] = PartitionResourceConfig(
                     partition_name=part_name,
-                    capacity=p_cap,
-                    max_capacity=p_max,
+                    capacity=round(p_cap, 2),
+                    max_capacity=round(p_max, 2),
                     is_elastic=p_max > p_cap,
                     elasticity_ratio=round(p_max / p_cap, 2) if p_cap > 0 else 1.0,
+                    memory_mb=int(round(total_mem * (p_abs_cap / 100.0))),
+                    vcores=int(round(total_vcores * (p_abs_cap / 100.0))),
+                    max_memory_mb=int(round(total_mem * (p_abs_max / 100.0))),
+                    max_vcores=int(round(total_vcores * (p_abs_max / 100.0))),
+                    memory_percent=round(p_cap, 2),
+                    vcore_percent=round(p_cap, 2),
+                    max_memory_percent=round(p_max, 2),
+                    max_vcore_percent=round(p_max, 2),
                 )
 
         # Дочерние очереди

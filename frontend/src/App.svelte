@@ -29,6 +29,8 @@
   let selectedPartition = $state('DEFAULT');
   let partitions = $state<string[]>(['DEFAULT']);
   let resourceMode = $state('percentage');
+  let displayMode = $state<'percentage' | 'absolute'>('percentage');
+  let exportMode = $state<'percentage' | 'absolute'>('percentage');
 
   // Draft state
   let draftChanges = $state(new Map<string, DraftQueueItem>());
@@ -221,17 +223,27 @@
     if (!rootQueue) return;
 
     const newBalances: BranchBalance[] = [];
+    const totalMem = activeCluster?.total_resources.memory_mb || 2097152;
+    const totalCores = activeCluster?.total_resources.vcores || 1024;
 
     function recurse(node: QueueNode) {
       if (node.children.length > 0) {
         let totalCap = 0;
+        let totalMemAlloc = 0;
+        let totalCoresAlloc = 0;
+
         for (const child of node.children) {
           const draft = draftChanges.get(child.path);
           if (draft?.action === 'delete') continue;
           const part = draft
             ? (draft.partitions[selectedPartition] || Object.values(draft.partitions)[0])
             : (child.partitions[selectedPartition] || child.partitions['DEFAULT']);
-          if (part) totalCap += part.capacity;
+          if (part) {
+            const cap = part.memory_percent ?? part.capacity;
+            totalCap += cap;
+            totalMemAlloc += part.memory_mb ?? Math.round(totalMem * (cap / 100));
+            totalCoresAlloc += part.vcores ?? Math.round(totalCores * (cap / 100));
+          }
         }
 
         const unallocated = 100 - totalCap;
@@ -245,6 +257,10 @@
           is_balanced: isBalanced,
           status: isBalanced ? 'ok' : unallocated > 0 ? 'underallocated' : 'overallocated',
           message: '',
+          total_children_memory_mb: totalMemAlloc,
+          total_children_vcores: totalCoresAlloc,
+          ram_is_balanced: isBalanced,
+          vcpu_is_balanced: isBalanced,
         });
 
         for (const child of node.children) {
@@ -269,12 +285,13 @@
     }
   }
 
-  async function handleGenerateXml() {
+  async function handleGenerateXml(mode?: 'percentage' | 'absolute') {
     if (!selectedClusterId || !canAdmin) return;
     try {
-      // Собираем полное дерево очередей с учётом draft
+      const targetMode = mode || exportMode;
+      exportMode = targetMode;
       const allQueues = collectAllQueues();
-      const resp = await api.generateXml(selectedClusterId, allQueues);
+      const resp = await api.generateXml(selectedClusterId, allQueues, undefined, targetMode);
       xmlContent = resp.xml_content;
       xmlFilename = resp.filename;
       xmlInstructions = resp.instructions;
@@ -322,11 +339,39 @@
 
     <ClusterMetricsBar metrics={clusterMetrics} />
 
-    {#if partitions.length > 1}
-      <PartitionSelector {partitions} bind:selectedPartition />
-    {/if}
+    <!-- Toolbar: Partitions and Display Mode -->
+    <div class="bg-white border-b border-slate-200 px-4 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-3 shrink-0">
+      <div class="flex items-center gap-3">
+        {#if partitions.length > 1}
+          <PartitionSelector {partitions} bind:selectedPartition />
+        {/if}
+      </div>
 
-    <ResourceBalanceCard {balances} {resourceMode} />
+      <!-- Mode Selector -->
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-slate-500 font-medium">Режим отображения:</span>
+        <div class="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+          <button
+            onclick={() => displayMode = 'percentage'}
+            class="px-2.5 py-1 rounded text-xs font-semibold cursor-pointer transition {
+              displayMode === 'percentage' ? 'bg-white text-sky-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            }"
+          >
+            % Проценты
+          </button>
+          <button
+            onclick={() => displayMode = 'absolute'}
+            class="px-2.5 py-1 rounded text-xs font-semibold cursor-pointer transition {
+              displayMode === 'absolute' ? 'bg-white text-sky-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            }"
+          >
+            Абсолютные (RAM/CPU)
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <ResourceBalanceCard {balances} {resourceMode} {displayMode} />
 
     {#if isLoading}
       <div class="flex-1 flex items-center justify-center">
@@ -349,6 +394,8 @@
       <QueueTreeTable
         {rootQueue}
         {resourceMode}
+        {displayMode}
+        clusterResources={activeCluster?.total_resources}
         {selectedPartition}
         {canWrite}
         {draftChanges}
@@ -365,13 +412,13 @@
           <button onclick={loadQueueTree}
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 text-xs font-medium hover:bg-slate-50 transition cursor-pointer">
             <RefreshCw class="w-3.5 h-3.5" />
-            Refresh
+            Обновить
           </button>
           {#if draftCount > 0}
             <button onclick={resetDraft}
               class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 text-red-700 text-xs font-medium hover:bg-red-50 transition cursor-pointer">
               <RotateCcw class="w-3.5 h-3.5" />
-              Reset All ({draftCount})
+              Сбросить все ({draftCount})
             </button>
           {/if}
         </div>
@@ -379,20 +426,20 @@
         <div class="flex items-center gap-2">
           {#if draftCount > 0}
             <span class="text-[11px] text-amber-600 font-medium px-2 py-1 bg-amber-50 border border-amber-200 rounded-lg">
-              {draftCount} pending change(s)
+              {draftCount} изм. в черновике
             </span>
 
             <button onclick={handleShowDiff}
               class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-sky-200 text-sky-700 text-xs font-medium hover:bg-sky-50 transition cursor-pointer">
               <GitCompareArrows class="w-3.5 h-3.5" />
-              Review Changes
+              Просмотр изменений
             </button>
 
             {#if canAdmin}
-              <button onclick={handleGenerateXml}
+              <button onclick={() => handleGenerateXml()}
                 class="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-gradient-to-r from-sky-600 to-indigo-600 text-white text-xs font-semibold shadow-md shadow-sky-500/20 hover:shadow-lg transition cursor-pointer">
                 <FileDown class="w-3.5 h-3.5" />
-                Generate XML
+                Сгенерировать XML
               </button>
             {/if}
           {/if}
@@ -405,6 +452,7 @@
       queue={editingQueue}
       draftItem={editingQueue ? draftChanges.get(editingQueue.path) || null : null}
       {resourceMode}
+      clusterResources={activeCluster?.total_resources}
       {selectedPartition}
       bind:isOpen={isDrawerOpen}
       onSave={handleSaveDraft}
@@ -414,6 +462,7 @@
       parentPath={addParentPath}
       bind:isOpen={showAddModal}
       {resourceMode}
+      clusterResources={activeCluster?.total_resources}
       {selectedPartition}
       onConfirm={handleConfirmAdd}
     />
@@ -422,14 +471,16 @@
       {diffs}
       {canAdmin}
       bind:isOpen={showDiffPanel}
-      onGenerateXml={handleGenerateXml}
+      onGenerateXml={() => handleGenerateXml()}
     />
 
     <XmlExportModal
       {xmlContent}
       filename={xmlFilename}
       instructions={xmlInstructions}
+      currentMode={exportMode}
       bind:isOpen={showXmlModal}
+      onModeChange={(newMode) => handleGenerateXml(newMode)}
     />
   {/if}
 </div>

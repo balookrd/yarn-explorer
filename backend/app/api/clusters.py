@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/clusters", tags=["clusters"])
 
 
+@router.get("", response_model=List[ClusterSummary])
 @router.get("/", response_model=List[ClusterSummary])
 async def get_clusters(user: UserSession = Depends(get_current_user)):
     """Возвращает список кластеров, доступных текущему пользователю, с его ролями."""

@@ -1,10 +1,13 @@
 <script lang="ts">
   import type { QueueNode, DraftQueueItem, PartitionResourceConfig } from '../types';
-  import { ChevronRight, ChevronDown, Folder, FileText, Plus, Trash2, Pencil } from 'lucide-svelte';
+  import { ChevronRight, ChevronDown, Folder, FileText, Plus, Trash2, Pencil, Cpu, HardDrive } from 'lucide-svelte';
+  import { formatMemory, formatVcores } from '../utils/resourceUtils';
 
   let {
     rootQueue,
     resourceMode,
+    displayMode = 'percentage',
+    clusterResources,
     selectedPartition,
     canWrite,
     draftChanges,
@@ -14,6 +17,8 @@
   }: {
     rootQueue: QueueNode | null;
     resourceMode: string;
+    displayMode: 'percentage' | 'absolute';
+    clusterResources?: { memory_mb: number; vcores: number };
     selectedPartition: string;
     canWrite: boolean;
     draftChanges: Map<string, DraftQueueItem>;
@@ -22,7 +27,7 @@
     onEditQueue: (queue: QueueNode) => void;
   } = $props();
 
-  let expandedPaths = $state<Set<string>>(new Set(['root', 'root.prod', 'root.dev']));
+  let expandedPaths = $state<Set<string>>(new Set(['root', 'root.production', 'root.analytics', 'root.batch', 'root.prod', 'root.dev']));
 
   interface FlatRow {
     node: QueueNode;
@@ -72,16 +77,16 @@
     return draftChanges.has(path);
   }
 
-  function formatDelta(live: number, draft: number): string {
+  function formatDelta(live: number, draft: number, suffix: string = '%'): string {
     const delta = draft - live;
     if (Math.abs(delta) < 0.01) return '';
-    return delta > 0 ? `+${delta.toFixed(1)}` : `${delta.toFixed(1)}`;
+    return delta > 0 ? `+${delta.toFixed(1)}${suffix}` : `${delta.toFixed(1)}${suffix}`;
   }
 
   function deltaClass(live: number, draft: number): string {
     const delta = draft - live;
     if (Math.abs(delta) < 0.01) return '';
-    return delta > 0 ? 'text-emerald-600' : 'text-red-600';
+    return delta > 0 ? 'text-emerald-600 font-bold' : 'text-red-600 font-bold';
   }
 </script>
 
@@ -89,15 +94,45 @@
   <table class="w-full text-xs">
     <thead class="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
       <tr class="text-[11px] text-slate-500 font-semibold uppercase tracking-wider">
-        <th class="text-left px-4 py-2.5 min-w-[280px]">Queue</th>
-        <th class="text-center px-2 py-2.5 w-20">Status</th>
-        <th class="text-right px-2 py-2.5 w-28">Capacity (%)</th>
-        <th class="text-right px-2 py-2.5 w-28">Max Capacity (%)</th>
-        <th class="text-center px-2 py-2.5 w-24">Type</th>
+        <th class="text-left px-4 py-2.5 min-w-[260px]">Queue</th>
+        <th class="text-center px-2 py-2.5 w-16">Status</th>
+        
+        <!-- RAM Capacity -->
+        <th class="text-right px-3 py-2.5 w-32">
+          <div class="flex items-center justify-end gap-1">
+            <HardDrive class="w-3.5 h-3.5 text-indigo-500" />
+            <span>RAM Cap</span>
+          </div>
+        </th>
+
+        <!-- vCPU Capacity -->
+        <th class="text-right px-3 py-2.5 w-32">
+          <div class="flex items-center justify-end gap-1">
+            <Cpu class="w-3.5 h-3.5 text-blue-500" />
+            <span>vCPU Cap</span>
+          </div>
+        </th>
+
+        <!-- RAM Max -->
+        <th class="text-right px-3 py-2.5 w-32">
+          <div class="flex items-center justify-end gap-1">
+            <HardDrive class="w-3.5 h-3.5 text-indigo-400" />
+            <span>RAM Max</span>
+          </div>
+        </th>
+
+        <!-- vCPU Max -->
+        <th class="text-right px-3 py-2.5 w-32">
+          <div class="flex items-center justify-end gap-1">
+            <Cpu class="w-3.5 h-3.5 text-blue-400" />
+            <span>vCPU Max</span>
+          </div>
+        </th>
+
         <th class="text-center px-2 py-2.5 w-20">Elasticity</th>
-        <th class="text-left px-2 py-2.5 w-36">Used</th>
-        <th class="text-center px-2 py-2.5 w-16">Apps</th>
-        <th class="text-center px-2 py-2.5 w-24">Actions</th>
+        <th class="text-left px-2 py-2.5 w-32">Used</th>
+        <th class="text-center px-2 py-2.5 w-14">Apps</th>
+        <th class="text-center px-2 py-2.5 w-20">Actions</th>
       </tr>
     </thead>
     <tbody>
@@ -106,11 +141,24 @@
         {@const draftPart = getDraftPartition(row.node.path)}
         {@const isDraft = hasDraftChange(row.node.path)}
         {@const draftItem = draftChanges.get(row.node.path)}
+
+        {@const liveCap = part ? (part.memory_percent ?? part.capacity) : 0}
+        {@const draftCap = draftPart ? (draftPart.memory_percent ?? draftPart.capacity) : liveCap}
+
+        {@const liveVcore = part ? (part.vcore_percent ?? part.capacity) : 0}
+        {@const draftVcore = draftPart ? (draftPart.vcore_percent ?? draftPart.capacity) : liveVcore}
+
+        {@const liveMaxCap = part ? (part.max_memory_percent ?? part.max_capacity) : 0}
+        {@const draftMaxCap = draftPart ? (draftPart.max_memory_percent ?? draftPart.max_capacity) : liveMaxCap}
+
+        {@const liveMaxVcore = part ? (part.max_vcore_percent ?? part.max_capacity) : 0}
+        {@const draftMaxVcore = draftPart ? (draftPart.max_vcore_percent ?? draftPart.max_capacity) : liveMaxVcore}
+
         <tr
           class="border-b border-slate-100 hover:bg-sky-50/40 transition {isDraft ? 'bg-amber-50/30' : ''} {draftItem?.action === 'create' ? 'bg-emerald-50/40' : ''} {draftItem?.action === 'delete' ? 'bg-red-50/40 opacity-60' : ''}"
         >
           <!-- Queue Name -->
-          <td class="px-4 py-2" style="padding-left: {16 + row.level * 24}px">
+          <td class="px-4 py-2" style="padding-left: {16 + row.level * 20}px">
             <div class="flex items-center gap-1.5">
               {#if row.hasChildren}
                 <button
@@ -137,10 +185,10 @@
               <span class="text-[10px] text-slate-400 font-mono">{row.node.path}</span>
 
               {#if draftItem?.action === 'create'}
-                <span class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold">NEW</span>
+                <span class="text-[9px] px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold">NEW</span>
               {/if}
               {#if draftItem?.action === 'delete'}
-                <span class="text-[9px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 border border-red-200 font-bold">DELETE</span>
+                <span class="text-[9px] px-1.5 py-0.2 rounded bg-red-100 text-red-700 border border-red-200 font-bold">DEL</span>
               {/if}
             </div>
           </td>
@@ -154,37 +202,106 @@
             </span>
           </td>
 
-          <!-- Capacity -->
-          <td class="text-right px-2 py-2 font-mono">
+          <!-- RAM Capacity -->
+          <td class="text-right px-3 py-2 font-mono">
             {#if part}
-              <span class="text-slate-800">{part.capacity.toFixed(1)}</span>
-              {#if isDraft && draftPart && Math.abs(draftPart.capacity - part.capacity) > 0.01}
-                <span class="ml-1 text-[10px] font-bold {deltaClass(part.capacity, draftPart.capacity)}">
-                  → {draftPart.capacity.toFixed(1)} ({formatDelta(part.capacity, draftPart.capacity)})
-                </span>
-              {/if}
-            {/if}
-          </td>
-
-          <!-- Max Capacity -->
-          <td class="text-right px-2 py-2 font-mono">
-            {#if part}
-              <span class="text-slate-800">{part.max_capacity.toFixed(1)}</span>
-              {#if isDraft && draftPart && Math.abs(draftPart.max_capacity - part.max_capacity) > 0.01}
-                <span class="ml-1 text-[10px] font-bold {deltaClass(part.max_capacity, draftPart.max_capacity)}">
-                  → {draftPart.max_capacity.toFixed(1)} ({formatDelta(part.max_capacity, draftPart.max_capacity)})
-                </span>
-              {/if}
-            {/if}
-          </td>
-
-          <!-- Type -->
-          <td class="text-center px-2 py-2">
-            {#if part}
-              {#if part.is_elastic}
-                <span class="text-[10px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 font-medium">Elastic</span>
+              {#if displayMode === 'percentage'}
+                <div>
+                  <span class="text-slate-900 font-semibold">{liveCap.toFixed(1)}%</span>
+                  {#if isDraft && draftPart && Math.abs(draftCap - liveCap) > 0.01}
+                    <span class="ml-1 text-[10px] {deltaClass(liveCap, draftCap)}">
+                      → {draftCap.toFixed(1)}% ({formatDelta(liveCap, draftCap)})
+                    </span>
+                  {/if}
+                </div>
+                <div class="text-[10px] text-slate-400 font-sans">
+                  {formatMemory(draftPart?.memory_mb ?? part.memory_mb)}
+                </div>
               {:else}
-                <span class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium">Fixed</span>
+                <div>
+                  <span class="text-slate-900 font-semibold">{formatMemory(draftPart?.memory_mb ?? part.memory_mb)}</span>
+                </div>
+                <div class="text-[10px] text-slate-400 font-sans">
+                  {draftCap.toFixed(1)}%
+                </div>
+              {/if}
+            {/if}
+          </td>
+
+          <!-- vCPU Capacity -->
+          <td class="text-right px-3 py-2 font-mono">
+            {#if part}
+              {#if displayMode === 'percentage'}
+                <div>
+                  <span class="text-slate-900 font-semibold">{liveVcore.toFixed(1)}%</span>
+                  {#if isDraft && draftPart && Math.abs(draftVcore - liveVcore) > 0.01}
+                    <span class="ml-1 text-[10px] {deltaClass(liveVcore, draftVcore)}">
+                      → {draftVcore.toFixed(1)}% ({formatDelta(liveVcore, draftVcore)})
+                    </span>
+                  {/if}
+                </div>
+                <div class="text-[10px] text-slate-400 font-sans">
+                  {formatVcores(draftPart?.vcores ?? part.vcores)}
+                </div>
+              {:else}
+                <div>
+                  <span class="text-slate-900 font-semibold">{formatVcores(draftPart?.vcores ?? part.vcores)}</span>
+                </div>
+                <div class="text-[10px] text-slate-400 font-sans">
+                  {draftVcore.toFixed(1)}%
+                </div>
+              {/if}
+            {/if}
+          </td>
+
+          <!-- RAM Max Capacity -->
+          <td class="text-right px-3 py-2 font-mono">
+            {#if part}
+              {#if displayMode === 'percentage'}
+                <div>
+                  <span class="text-slate-700">{liveMaxCap.toFixed(1)}%</span>
+                  {#if isDraft && draftPart && Math.abs(draftMaxCap - liveMaxCap) > 0.01}
+                    <span class="ml-1 text-[10px] {deltaClass(liveMaxCap, draftMaxCap)}">
+                      → {draftMaxCap.toFixed(1)}% ({formatDelta(liveMaxCap, draftMaxCap)})
+                    </span>
+                  {/if}
+                </div>
+                <div class="text-[10px] text-slate-400 font-sans">
+                  {formatMemory(draftPart?.max_memory_mb ?? part.max_memory_mb)}
+                </div>
+              {:else}
+                <div>
+                  <span class="text-slate-700">{formatMemory(draftPart?.max_memory_mb ?? part.max_memory_mb)}</span>
+                </div>
+                <div class="text-[10px] text-slate-400 font-sans">
+                  {draftMaxCap.toFixed(1)}%
+                </div>
+              {/if}
+            {/if}
+          </td>
+
+          <!-- vCPU Max Capacity -->
+          <td class="text-right px-3 py-2 font-mono">
+            {#if part}
+              {#if displayMode === 'percentage'}
+                <div>
+                  <span class="text-slate-700">{liveMaxVcore.toFixed(1)}%</span>
+                  {#if isDraft && draftPart && Math.abs(draftMaxVcore - liveMaxVcore) > 0.01}
+                    <span class="ml-1 text-[10px] {deltaClass(liveMaxVcore, draftMaxVcore)}">
+                      → {draftMaxVcore.toFixed(1)}% ({formatDelta(liveMaxVcore, draftMaxVcore)})
+                    </span>
+                  {/if}
+                </div>
+                <div class="text-[10px] text-slate-400 font-sans">
+                  {formatVcores(draftPart?.max_vcores ?? part.max_vcores)}
+                </div>
+              {:else}
+                <div>
+                  <span class="text-slate-700">{formatVcores(draftPart?.max_vcores ?? part.max_vcores)}</span>
+                </div>
+                <div class="text-[10px] text-slate-400 font-sans">
+                  {draftMaxVcore.toFixed(1)}%
+                </div>
               {/if}
             {/if}
           </td>

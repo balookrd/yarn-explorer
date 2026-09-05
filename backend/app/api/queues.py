@@ -162,6 +162,20 @@ async def get_diff(
                 round(draft_part.max_capacity - live_part.max_capacity, 2)
                 if draft_part and live_part else None
             ),
+            live_memory_mb=live_part.memory_mb if live_part else None,
+            draft_memory_mb=draft_part.memory_mb if draft_part else None,
+            delta_memory_mb=(
+                draft_part.memory_mb - live_part.memory_mb
+                if draft_part and live_part and draft_part.memory_mb is not None and live_part.memory_mb is not None
+                else None
+            ),
+            live_vcores=live_part.vcores if live_part else None,
+            draft_vcores=draft_part.vcores if draft_part else None,
+            delta_vcores=(
+                draft_part.vcores - live_part.vcores
+                if draft_part and live_part and draft_part.vcores is not None and live_part.vcores is not None
+                else None
+            ),
             live_state=live_q.state if live_q else None,
             draft_state=draft_q.state,
         ))
@@ -194,6 +208,7 @@ async def generate_xml(
         cluster=cluster,
         generated_by=user.username,
         comment=body.proposal_comment or "",
+        resource_mode=body.resource_mode_override,
     )
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")

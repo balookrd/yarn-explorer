@@ -37,6 +37,14 @@ export interface PartitionResourceConfig {
   max_capacity: number;
   is_elastic: boolean;
   elasticity_ratio: number;
+  memory_mb?: number;
+  vcores?: number;
+  max_memory_mb?: number;
+  max_vcores?: number;
+  memory_percent?: number;
+  vcore_percent?: number;
+  max_memory_percent?: number;
+  max_vcore_percent?: number;
   absolute_resources?: ResourceAllocation;
   absolute_max_resources?: ResourceAllocation;
 }
@@ -79,6 +87,12 @@ export interface BranchBalance {
   is_balanced: boolean;
   status: string;
   message: string;
+  total_children_memory_mb?: number;
+  unallocated_memory_mb?: number;
+  total_children_vcores?: number;
+  unallocated_vcores?: number;
+  ram_is_balanced?: boolean;
+  vcpu_is_balanced?: boolean;
 }
 
 export interface QueueTreeResponse {
@@ -114,6 +128,12 @@ export interface DiffItem {
   live_max_capacity?: number;
   draft_max_capacity?: number;
   delta_max_capacity?: number;
+  live_memory_mb?: number;
+  draft_memory_mb?: number;
+  delta_memory_mb?: number;
+  live_vcores?: number;
+  draft_vcores?: number;
+  delta_vcores?: number;
   live_type?: string;
   draft_type?: string;
   live_state?: string;

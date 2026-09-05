@@ -21,10 +21,22 @@ class ResourceAllocation(BaseModel):
 
 class PartitionResourceConfig(BaseModel):
     partition_name: str = "DEFAULT"
-    capacity: float = Field(..., description="Гарантированная емкость (% или абсолютное значение)")
-    max_capacity: float = Field(..., description="Максимальная емкость (% или абсолютное значение)")
+    capacity: float = Field(..., description="Гарантированная емкость (%)")
+    max_capacity: float = Field(..., description="Максимальная емкость (%)")
     is_elastic: bool = Field(False, description="Эластичная ли очередь (max_capacity > capacity)")
     elasticity_ratio: float = Field(1.0, description="Коэффициент эластичности (max_capacity / capacity)")
+    
+    # Раздельные ресурсы RAM и vCPU
+    memory_mb: Optional[int] = Field(None, description="Гарантированная память (RAM) в MB")
+    vcores: Optional[int] = Field(None, description="Гарантированные ядра (vCPU)")
+    max_memory_mb: Optional[int] = Field(None, description="Максимальная память (RAM) в MB")
+    max_vcores: Optional[int] = Field(None, description="Максимальные ядра (vCPU)")
+    
+    memory_percent: Optional[float] = Field(None, description="Процент памяти (RAM) от родителя")
+    vcore_percent: Optional[float] = Field(None, description="Процент ядер (vCPU) от родителя")
+    max_memory_percent: Optional[float] = Field(None, description="Макс. процент памяти (RAM) от родителя")
+    max_vcore_percent: Optional[float] = Field(None, description="Макс. процент ядер (vCPU) от родителя")
+
     absolute_resources: Optional[ResourceAllocation] = None
     absolute_max_resources: Optional[ResourceAllocation] = None
 
@@ -70,6 +82,14 @@ class BranchBalance(BaseModel):
     is_balanced: bool
     status: str  # "ok", "underallocated", "overallocated"
     message: str
+    
+    # Раздельный баланс по RAM и vCPU
+    total_children_memory_mb: Optional[int] = None
+    unallocated_memory_mb: Optional[int] = None
+    total_children_vcores: Optional[int] = None
+    unallocated_vcores: Optional[int] = None
+    ram_is_balanced: Optional[bool] = None
+    vcpu_is_balanced: Optional[bool] = None
 
 
 class QueueTreeResponse(BaseModel):
@@ -122,6 +142,16 @@ class DiffItem(BaseModel):
     draft_max_capacity: Optional[float] = None
     delta_max_capacity: Optional[float] = None
     
+    # RAM diff
+    live_memory_mb: Optional[int] = None
+    draft_memory_mb: Optional[int] = None
+    delta_memory_mb: Optional[int] = None
+
+    # vCPU diff
+    live_vcores: Optional[int] = None
+    draft_vcores: Optional[int] = None
+    delta_vcores: Optional[int] = None
+
     live_type: Optional[QueueType] = None
     draft_type: Optional[QueueType] = None
     
@@ -139,6 +169,7 @@ class GenerateXmlRequest(BaseModel):
     cluster_id: str
     queues: List[QueueDraftItem]
     proposal_comment: Optional[str] = None
+    resource_mode_override: Optional[str] = None  # percentage | absolute
 
 
 class GenerateXmlResponse(BaseModel):
