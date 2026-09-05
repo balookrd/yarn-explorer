@@ -1,1 +1,0 @@
-stop-demo.sh
