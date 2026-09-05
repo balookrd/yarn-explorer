@@ -145,3 +145,41 @@ export interface TokenResponse {
   token_type: string;
   user: UserSession;
 }
+
+export interface ChangeRequestSummary {
+  id: number;
+  cluster_id: string;
+  title: string;
+  status: 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+  author: string;
+  changes_count: number;
+  created_at: string;
+  updated_at: string;
+  reviewer?: string;
+  reviewed_at?: string;
+}
+
+export interface ChangeRequestResponse {
+  id: number;
+  cluster_id: string;
+  title: string;
+  description: string;
+  status: 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+  author: string;
+  created_at: string;
+  updated_at: string;
+  reviewer?: string;
+  review_comment?: string;
+  reviewed_at?: string;
+  changes: DraftQueueItem[];
+  diffs: DiffItem[];
+  xml_content?: string;
+}
+
+export interface ChangeRequestCreate {
+  cluster_id: string;
+  title: string;
+  description?: string;
+  changes: DraftQueueItem[];
+}
+

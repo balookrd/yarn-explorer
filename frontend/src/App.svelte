@@ -15,7 +15,9 @@
   import ResourceBalanceCard from './components/ResourceBalanceCard.svelte';
   import DiffPanel from './components/DiffPanel.svelte';
   import XmlExportModal from './components/XmlExportModal.svelte';
-  import { GitCompareArrows, RotateCcw, FileDown, RefreshCw } from 'lucide-svelte';
+  import SubmitChangeRequestModal from './components/SubmitChangeRequestModal.svelte';
+  import ChangeRequestsDrawer from './components/ChangeRequestsDrawer.svelte';
+  import { GitCompareArrows, RotateCcw, FileDown, RefreshCw, Send, GitPullRequest } from 'lucide-svelte';
 
   // Auth state
   let user = $state<UserSession | null>(null);
@@ -34,6 +36,11 @@
 
   // Draft state
   let draftChanges = $state(new Map<string, DraftQueueItem>());
+
+  // Change Requests state
+  let showSubmitCrModal = $state(false);
+  let showCrDrawer = $state(false);
+  let pendingCrCount = $state(0);
 
   // UI state
   let editingQueue = $state<QueueNode | null>(null);
@@ -91,6 +98,7 @@
       selectedPartition = resp.default_partition;
       // Сбрасываем черновик при смене кластера
       draftChanges = new Map();
+      await loadPendingCrCount();
     } catch (err: any) {
       loadError = err.message || 'Ошибка загрузки очередей';
     } finally {
@@ -324,6 +332,47 @@
     recurse(rootQueue);
     return result;
   }
+
+  async function loadPendingCrCount() {
+    if (!selectedClusterId) return;
+    try {
+      const resp = await api.getPendingCount(selectedClusterId);
+      pendingCrCount = resp.pending_count;
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleSubmitChangeRequest(title: string, description: string) {
+    if (!selectedClusterId) return;
+    const changes = Array.from(draftChanges.values());
+    await api.createChangeRequest({
+      cluster_id: selectedClusterId,
+      title,
+      description,
+      changes,
+    });
+    draftChanges = new Map();
+    recalcBalances();
+    await loadPendingCrCount();
+    alert('Заявка на согласование успешно создана и передана администратору!');
+  }
+
+  function handleApplyCrToDraft(changes: DraftQueueItem[]) {
+    const newMap = new Map(draftChanges);
+    for (const c of changes) {
+      newMap.set(c.path, c);
+    }
+    draftChanges = newMap;
+    recalcBalances();
+  }
+
+  function handleViewCrXml(xml: string, title: string) {
+    xmlContent = xml;
+    xmlFilename = `capacity-scheduler-${selectedClusterId}.xml`;
+    xmlInstructions = `XML сгенерирован для заявки: ${title}\n1. Скопируйте файл в /etc/hadoop/conf/capacity-scheduler.xml\n2. Выполните: yarn rmadmin -refreshQueues`;
+    showXmlModal = true;
+  }
 </script>
 
 <div class="h-screen w-screen flex flex-col overflow-hidden">
@@ -334,6 +383,8 @@
       {user}
       {clusters}
       bind:selectedClusterId
+      {pendingCrCount}
+      onOpenChangeRequests={() => showCrDrawer = true}
       onLogout={handleLogout}
     />
 
@@ -435,6 +486,12 @@
               Просмотр изменений
             </button>
 
+            <button onclick={() => showSubmitCrModal = true}
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50/60 hover:bg-indigo-50 text-xs font-semibold transition cursor-pointer">
+              <Send class="w-3.5 h-3.5" />
+              Отправить на согласование
+            </button>
+
             {#if canAdmin}
               <button onclick={() => handleGenerateXml()}
                 class="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-gradient-to-r from-sky-600 to-indigo-600 text-white text-xs font-semibold shadow-md shadow-sky-500/20 hover:shadow-lg transition cursor-pointer">
@@ -481,6 +538,22 @@
       currentMode={exportMode}
       bind:isOpen={showXmlModal}
       onModeChange={(newMode) => handleGenerateXml(newMode)}
+    />
+
+    <SubmitChangeRequestModal
+      clusterId={selectedClusterId}
+      changes={Array.from(draftChanges.values())}
+      bind:isOpen={showSubmitCrModal}
+      onSubmit={handleSubmitChangeRequest}
+    />
+
+    <ChangeRequestsDrawer
+      clusterId={selectedClusterId}
+      {canAdmin}
+      currentUsername={user?.username || ''}
+      bind:isOpen={showCrDrawer}
+      onApplyToDraft={handleApplyCrToDraft}
+      onViewXml={handleViewCrXml}
     />
   {/if}
 </div>

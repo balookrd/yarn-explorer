@@ -1,17 +1,21 @@
 <script lang="ts">
   import type { UserSession, ClusterSummary } from '../types';
-  import { Layers, Shield, User, LogOut, ChevronDown, Cpu, Server } from 'lucide-svelte';
+  import { Layers, Shield, User, LogOut, ChevronDown, Cpu, Server, GitPullRequest } from 'lucide-svelte';
 
   let {
     user,
     clusters,
     selectedClusterId = $bindable(),
-    onLogout
+    pendingCrCount = 0,
+    onLogout,
+    onOpenChangeRequests,
   }: {
     user: UserSession | null;
     clusters: ClusterSummary[];
     selectedClusterId: string;
+    pendingCrCount?: number;
     onLogout: () => void;
+    onOpenChangeRequests?: () => void;
   } = $props();
 
   let showUserMenu = $state(false);
@@ -75,8 +79,26 @@
     </div>
   </div>
 
-  <!-- User Profile -->
-  <div class="relative">
+  <div class="flex items-center gap-2.5">
+    <!-- Change Requests Button -->
+    {#if onOpenChangeRequests}
+      <button
+        onclick={onOpenChangeRequests}
+        title="Заявки на согласование изменений"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-medium text-slate-700 transition cursor-pointer shadow-2xs"
+      >
+        <GitPullRequest class="w-3.5 h-3.5 text-indigo-600" />
+        <span class="hidden sm:inline">Заявки</span>
+        {#if pendingCrCount > 0}
+          <span class="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500 text-white shadow-xs animate-pulse">
+            {pendingCrCount}
+          </span>
+        {/if}
+      </button>
+    {/if}
+
+    <!-- User Profile -->
+    <div class="relative">
     <button
       onclick={() => (showUserMenu = !showUserMenu)}
       class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 transition cursor-pointer text-left shadow-2xs"
@@ -137,5 +159,6 @@
         </button>
       </div>
     {/if}
+    </div>
   </div>
 </header>

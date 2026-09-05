@@ -106,4 +106,49 @@ export const api = {
       }
     );
   },
+
+  // Change Requests API
+  async listChangeRequests(clusterId?: string, status?: string) {
+    const params = new URLSearchParams();
+    if (clusterId) params.append('cluster_id', clusterId);
+    if (status) params.append('status', status);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return request<import('../types').ChangeRequestSummary[]>(`/change-requests${qs}`);
+  },
+
+  async getPendingCount(clusterId?: string) {
+    const qs = clusterId ? `?cluster_id=${clusterId}` : '';
+    return request<{ pending_count: number }>(`/change-requests/pending-count${qs}`);
+  },
+
+  async getChangeRequest(id: number) {
+    return request<import('../types').ChangeRequestResponse>(`/change-requests/${id}`);
+  },
+
+  async createChangeRequest(data: import('../types').ChangeRequestCreate) {
+    return request<import('../types').ChangeRequestResponse>('/change-requests', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async approveChangeRequest(id: number, comment?: string) {
+    return request<import('../types').ChangeRequestResponse>(`/change-requests/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ comment: comment || '' }),
+    });
+  },
+
+  async rejectChangeRequest(id: number, comment?: string) {
+    return request<import('../types').ChangeRequestResponse>(`/change-requests/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ comment: comment || '' }),
+    });
+  },
+
+  async cancelChangeRequest(id: number) {
+    return request<import('../types').ChangeRequestResponse>(`/change-requests/${id}/cancel`, {
+      method: 'POST',
+    });
+  },
 };

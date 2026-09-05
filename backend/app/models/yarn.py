@@ -114,6 +114,9 @@ class QueueDraftItem(BaseModel):
     partitions: Dict[str, PartitionResourceConfig]
 
 
+DraftQueueItem = QueueDraftItem
+
+
 class DraftValidateRequest(BaseModel):
     cluster_id: str
     selected_partition: str = "DEFAULT"

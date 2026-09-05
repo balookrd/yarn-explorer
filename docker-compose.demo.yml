@@ -8,6 +8,8 @@ volumes:
     name: yarn-demo-shared-keytabs
   yarn-demo-shared-krb5:
     name: yarn-demo-shared-krb5
+  yarn-demo-data:
+    name: yarn-demo-data
 
 services:
   yarn-demo-kdc:
@@ -123,11 +125,13 @@ services:
     environment:
       - CONFIG_PATH=/app/demo/config.yaml
       - KRB5_CONFIG=/etc/krb5.conf
+      - DB_PATH=/app/data/yarn_explorer.db
       - PYTHONUNBUFFERED=1
     volumes:
       - ./demo/config.yaml:/app/demo/config.yaml:ro
       - yarn-demo-shared-krb5:/shared-krb5:ro
       - yarn-demo-shared-keytabs:/etc/security/keytabs:ro
+      - yarn-demo-data:/app/data
     entrypoint:
       - /bin/bash
       - -c

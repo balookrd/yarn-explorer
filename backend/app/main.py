@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.api.auth import router as auth_router
 from app.api.clusters import router as clusters_router
 from app.api.queues import router as queues_router
+from app.api.change_requests import router as change_requests_router
 
 logging.basicConfig(
     level=logging.DEBUG if settings.server.debug else logging.INFO,
@@ -51,6 +52,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(clusters_router)
 app.include_router(queues_router)
+app.include_router(change_requests_router)
 
 # Статика фронтенда
 frontend_dist = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")
