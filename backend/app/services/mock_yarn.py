@@ -89,6 +89,8 @@ def get_mock_queue_tree(cluster: ClusterConfig) -> QueueNode:
         parent_path="root.prod",
         is_leaf=True,
         state=QueueState.RUNNING,
+        user_limit_factor=2.0,
+        ordering_policy="fair",
         partitions=spark_parts,
         allocated_resources=ResourceAllocation(memory_mb=int(total_mem * 0.24), vcores=int(total_cores * 0.22)),
         current_used_resources=ResourceAllocation(memory_mb=int(total_mem * 0.21), vcores=int(total_cores * 0.19)),
@@ -105,6 +107,8 @@ def get_mock_queue_tree(cluster: ClusterConfig) -> QueueNode:
         parent_path="root.prod",
         is_leaf=True,
         state=QueueState.RUNNING,
+        user_limit_factor=1.0,
+        ordering_policy="fifo",
         partitions={"DEFAULT": make_part(35.0, 50.0)},
         allocated_resources=ResourceAllocation(memory_mb=int(total_mem * 0.21), vcores=int(total_cores * 0.20)),
         current_used_resources=ResourceAllocation(memory_mb=int(total_mem * 0.18), vcores=int(total_cores * 0.17)),
@@ -121,6 +125,8 @@ def get_mock_queue_tree(cluster: ClusterConfig) -> QueueNode:
         parent_path="root.prod",
         is_leaf=True,
         state=QueueState.RUNNING,
+        user_limit_factor=1.5,
+        ordering_policy="fair",
         partitions={"DEFAULT": make_part(25.0, 25.0)},  # Фиксированная очередь
         allocated_resources=ResourceAllocation(memory_mb=int(total_mem * 0.15), vcores=int(total_cores * 0.15)),
         current_used_resources=ResourceAllocation(memory_mb=int(total_mem * 0.12), vcores=int(total_cores * 0.12)),
@@ -231,4 +237,10 @@ def get_mock_queue_tree(cluster: ClusterConfig) -> QueueNode:
         children=[prod_queue, dev_queue, default_queue]
     )
 
+    def _apply_resource_mode(node: QueueNode):
+        node.resource_mode = cluster.resource_mode
+        for ch in node.children:
+            _apply_resource_mode(ch)
+
+    _apply_resource_mode(root_queue)
     return root_queue

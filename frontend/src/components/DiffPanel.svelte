@@ -1,20 +1,24 @@
 <script lang="ts">
-  import type { DiffItem } from '../types';
-  import { X, FileDown, Send } from 'lucide-svelte';
+  import type { DiffItem, QueueMappingsDiff } from '../types';
+  import { X, FileDown, Send, ArrowRightLeft } from 'lucide-svelte';
 
   let {
     diffs,
+    queueMappingsDiff = null,
     canAdmin,
     isOpen = $bindable(),
     onGenerateXml,
   }: {
     diffs: DiffItem[];
+    queueMappingsDiff?: QueueMappingsDiff | null;
     canAdmin: boolean;
     isOpen: boolean;
     onGenerateXml: () => void;
   } = $props();
 
   const changedDiffs = $derived(diffs.filter(d => d.action !== 'unchanged'));
+  const hasMappingsDiff = $derived(queueMappingsDiff?.is_changed || false);
+  const totalChangesCount = $derived(changedDiffs.length + (hasMappingsDiff ? 1 : 0));
 
   function actionBadge(action: string): string {
     switch (action) {
@@ -28,67 +32,124 @@
 
 {#if isOpen}
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[80vh] flex flex-col">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col">
       <!-- Header -->
       <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200">
         <div>
           <h2 class="text-sm font-bold text-slate-900">Changes Review (Live → Draft)</h2>
-          <p class="text-[11px] text-slate-500 mt-0.5">{changedDiffs.length} change(s)</p>
+          <p class="text-[11px] text-slate-500 mt-0.5">{totalChangesCount} change(s)</p>
         </div>
         <button onclick={() => isOpen = false} class="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 cursor-pointer">
           <X class="w-4 h-4 text-slate-500" />
         </button>
       </div>
 
-      <!-- Table -->
-      <div class="flex-1 overflow-auto">
-        <table class="w-full text-xs">
-          <thead class="bg-slate-50 sticky top-0">
-            <tr class="text-[11px] text-slate-500 font-semibold uppercase tracking-wider">
-              <th class="text-left px-4 py-2.5">Queue</th>
-              <th class="text-center px-2 py-2.5">Action</th>
-              <th class="text-right px-2 py-2.5">Capacity</th>
-              <th class="text-center px-2 py-2.5"></th>
-              <th class="text-right px-2 py-2.5">Draft Capacity</th>
-              <th class="text-right px-2 py-2.5">Max Cap</th>
-              <th class="text-center px-2 py-2.5"></th>
-              <th class="text-right px-2 py-2.5">Draft Max</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each changedDiffs as d}
-              <tr class="border-b border-slate-100 hover:bg-slate-50">
-                <td class="px-4 py-2 font-mono font-semibold text-slate-800">{d.path}</td>
-                <td class="text-center px-2 py-2">
-                  <span class="text-[10px] px-2 py-0.5 rounded-full font-bold capitalize {actionBadge(d.action)}">{d.action}</span>
-                </td>
-                <td class="text-right px-2 py-2 font-mono text-slate-500">
-                  {d.live_capacity != null ? `${d.live_capacity.toFixed(1)}%` : '—'}
-                </td>
-                <td class="text-center px-2 py-2 text-slate-400">→</td>
-                <td class="text-right px-2 py-2 font-mono font-bold {
-                  d.delta_capacity != null && d.delta_capacity > 0 ? 'text-emerald-600' :
-                  d.delta_capacity != null && d.delta_capacity < 0 ? 'text-red-600' : 'text-slate-800'
-                }">
-                  {d.draft_capacity != null ? `${d.draft_capacity.toFixed(1)}%` : '—'}
-                  {#if d.delta_capacity != null && Math.abs(d.delta_capacity) > 0.01}
-                    <span class="text-[10px] ml-1">({d.delta_capacity > 0 ? '+' : ''}{d.delta_capacity.toFixed(1)})</span>
-                  {/if}
-                </td>
-                <td class="text-right px-2 py-2 font-mono text-slate-500">
-                  {d.live_max_capacity != null ? `${d.live_max_capacity.toFixed(1)}%` : '—'}
-                </td>
-                <td class="text-center px-2 py-2 text-slate-400">→</td>
-                <td class="text-right px-2 py-2 font-mono font-bold {
-                  d.delta_max_capacity != null && d.delta_max_capacity > 0 ? 'text-emerald-600' :
-                  d.delta_max_capacity != null && d.delta_max_capacity < 0 ? 'text-red-600' : 'text-slate-800'
-                }">
-                  {d.draft_max_capacity != null ? `${d.draft_max_capacity.toFixed(1)}%` : '—'}
-                </td>
+      <!-- Content -->
+      <div class="flex-1 overflow-auto divide-y divide-slate-100">
+        <!-- Queue Mappings Diff Card -->
+        {#if hasMappingsDiff && queueMappingsDiff}
+          <div class="p-4 bg-indigo-50/50 border-b border-indigo-100">
+            <div class="flex items-center gap-2 mb-2">
+              <ArrowRightLeft class="w-4 h-4 text-indigo-600" />
+              <span class="text-xs font-bold text-slate-900">Queue Mappings & Overrides</span>
+              <span class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-100 text-amber-700">modified</span>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div class="bg-white rounded-lg p-2.5 border border-slate-200">
+                <div class="text-[10px] uppercase font-bold text-slate-400 mb-1">Live Configuration</div>
+                <div class="font-mono text-[11px] text-slate-700 break-all">
+                  {queueMappingsDiff.live_mappings || '<пусто>'}
+                </div>
+                <div class="mt-1.5 text-[11px] text-slate-500">
+                  Override enabled: <span class="font-semibold">{queueMappingsDiff.live_override ? 'true' : 'false'}</span>
+                </div>
+              </div>
+
+              <div class="bg-indigo-50/80 rounded-lg p-2.5 border border-indigo-200">
+                <div class="text-[10px] uppercase font-bold text-indigo-600 mb-1">Draft Configuration</div>
+                <div class="font-mono text-[11px] text-indigo-950 font-semibold break-all">
+                  {queueMappingsDiff.draft_mappings || '<пусто>'}
+                </div>
+                <div class="mt-1.5 text-[11px] text-indigo-900">
+                  Override enabled: <span class="font-semibold">{queueMappingsDiff.draft_override ? 'true' : 'false'}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        {/if}
+
+        <!-- Queues Table -->
+        {#if changedDiffs.length > 0}
+          <table class="w-full text-xs">
+            <thead class="bg-slate-50 sticky top-0">
+              <tr class="text-[11px] text-slate-500 font-semibold uppercase tracking-wider">
+                <th class="text-left px-4 py-2.5">Queue</th>
+                <th class="text-center px-2 py-2.5">Action</th>
+                <th class="text-right px-2 py-2.5">Capacity</th>
+                <th class="text-center px-2 py-2.5"></th>
+                <th class="text-right px-2 py-2.5">Draft Capacity</th>
+                <th class="text-right px-2 py-2.5">Max Cap</th>
+                <th class="text-center px-2 py-2.5"></th>
+                <th class="text-right px-2 py-2.5">Draft Max</th>
               </tr>
-            {/each}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {#each changedDiffs as d}
+                <tr class="border-b border-slate-100 hover:bg-slate-50">
+                  <td class="px-4 py-2 font-mono text-slate-800">
+                    <div class="font-semibold">{d.path}</div>
+                    {#if d.draft_resource_mode && d.live_resource_mode && d.draft_resource_mode !== d.live_resource_mode}
+                      <div class="text-[10px] text-amber-700 font-sans mt-0.5">
+                        Режим: <span class="font-bold">{d.live_resource_mode === 'absolute' ? 'ABS' : '%'} → {d.draft_resource_mode === 'absolute' ? 'ABS' : '%'}</span>
+                      </div>
+                    {/if}
+                    {#if d.draft_user_limit_factor != null && d.live_user_limit_factor !== d.draft_user_limit_factor}
+                      <div class="text-[10px] text-sky-700 font-sans mt-0.5">
+                        User Limit Factor: <span class="font-bold">{d.live_user_limit_factor ?? 1.0} → {d.draft_user_limit_factor}</span>
+                      </div>
+                    {/if}
+                    {#if d.draft_ordering_policy && d.live_ordering_policy !== d.draft_ordering_policy}
+                      <div class="text-[10px] text-purple-700 font-sans mt-0.5">
+                        Ordering Policy: <span class="font-bold">{d.live_ordering_policy ?? 'fifo'} → {d.draft_ordering_policy}</span>
+                      </div>
+                    {/if}
+                  </td>
+                  <td class="text-center px-2 py-2">
+                    <span class="text-[10px] px-2 py-0.5 rounded-full font-bold capitalize {actionBadge(d.action)}">{d.action}</span>
+                  </td>
+                  <td class="text-right px-2 py-2 font-mono text-slate-500">
+                    {d.live_capacity != null ? `${d.live_capacity.toFixed(1)}%` : '—'}
+                  </td>
+                  <td class="text-center px-2 py-2 text-slate-400">→</td>
+                  <td class="text-right px-2 py-2 font-mono font-bold {
+                    d.delta_capacity != null && d.delta_capacity > 0 ? 'text-emerald-600' :
+                    d.delta_capacity != null && d.delta_capacity < 0 ? 'text-red-600' : 'text-slate-800'
+                  }">
+                    {d.draft_capacity != null ? `${d.draft_capacity.toFixed(1)}%` : '—'}
+                    {#if d.delta_capacity != null && Math.abs(d.delta_capacity) > 0.01}
+                      <span class="text-[10px] ml-1">({d.delta_capacity > 0 ? '+' : ''}{d.delta_capacity.toFixed(1)})</span>
+                    {/if}
+                  </td>
+                  <td class="text-right px-2 py-2 font-mono text-slate-500">
+                    {d.live_max_capacity != null ? `${d.live_max_capacity.toFixed(1)}%` : '—'}
+                  </td>
+                  <td class="text-center px-2 py-2 text-slate-400">→</td>
+                  <td class="text-right px-2 py-2 font-mono font-bold {
+                    d.delta_max_capacity != null && d.delta_max_capacity > 0 ? 'text-emerald-600' :
+                    d.delta_max_capacity != null && d.delta_max_capacity < 0 ? 'text-red-600' : 'text-slate-800'
+                  }">
+                    {d.draft_max_capacity != null ? `${d.draft_max_capacity.toFixed(1)}%` : '—'}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {:else if !hasMappingsDiff}
+          <div class="p-8 text-center text-slate-400 text-xs">
+            Нет обнаруженных изменений
+          </div>
+        {/if}
       </div>
 
       <!-- Footer -->
@@ -116,3 +177,4 @@
     </div>
   </div>
 {/if}
+

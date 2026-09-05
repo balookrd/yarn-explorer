@@ -48,6 +48,9 @@ async def get_queue_tree(cluster_id: str, user: UserSession = Depends(get_curren
     # Вычисляем балансы
     balances = compute_balances_from_tree(root_queue, cluster.default_partition)
 
+    queue_mappings = getattr(cluster, "queue_mappings", None)
+    queue_mappings_override = getattr(cluster, "queue_mappings_override", False)
+
     return QueueTreeResponse(
         cluster_id=cluster.id,
         cluster_name=cluster.name,
@@ -57,6 +60,8 @@ async def get_queue_tree(cluster_id: str, user: UserSession = Depends(get_curren
         root_queue=root_queue,
         cluster_metrics=metrics,
         balances=balances,
+        queue_mappings=queue_mappings,
+        queue_mappings_override=queue_mappings_override,
     )
 
 
@@ -127,6 +132,14 @@ async def get_diff(
         draft_part = draft_q.partitions.get(partition)
         live_part = live_q.partitions.get(partition) if live_q else None
 
+        live_mode = getattr(live_q, "resource_mode", None) if live_q else None
+        draft_mode = draft_q.resource_mode or live_mode or cluster.resource_mode
+
+        live_ulf = getattr(live_q, "user_limit_factor", None) if live_q else None
+        draft_ulf = draft_q.user_limit_factor
+        live_ordering = getattr(live_q, "ordering_policy", None) if live_q else None
+        draft_ordering = draft_q.ordering_policy
+
         if draft_q.action == "create":
             action = "created"
         elif draft_q.action == "delete":
@@ -139,6 +152,12 @@ async def get_diff(
                     abs(draft_part.max_capacity - live_part.max_capacity) > 0.01):
                     has_changes = True
             if live_q.state != draft_q.state:
+                has_changes = True
+            if draft_q.resource_mode and live_mode and draft_q.resource_mode != live_mode:
+                has_changes = True
+            if draft_ulf is not None and live_ulf is not None and abs(draft_ulf - live_ulf) > 0.001:
+                has_changes = True
+            if draft_ordering and live_ordering and draft_ordering.lower() != live_ordering.lower():
                 has_changes = True
             action = "modified" if has_changes else "unchanged"
         else:
@@ -178,14 +197,42 @@ async def get_diff(
             ),
             live_state=live_q.state if live_q else None,
             draft_state=draft_q.state,
+            live_resource_mode=live_mode,
+            draft_resource_mode=draft_mode,
+            live_user_limit_factor=live_ulf,
+            draft_user_limit_factor=draft_ulf,
+            live_ordering_policy=live_ordering,
+            draft_ordering_policy=draft_ordering,
         ))
 
     has_changes = any(d.action != "unchanged" for d in diffs)
+
+    # Проверяем изменение queue_mappings
+    mappings_diff = None
+    live_mappings = getattr(cluster, "queue_mappings", "")
+    live_override = getattr(cluster, "queue_mappings_override", False)
+    if body.queue_mappings is not None and body.queue_mappings.strip() != (live_mappings or "").strip():
+        mappings_diff = {
+            "live": live_mappings,
+            "draft": body.queue_mappings,
+            "override_live": live_override,
+            "override_draft": body.queue_mappings_override if body.queue_mappings_override is not None else live_override,
+        }
+        has_changes = True
+    elif body.queue_mappings_override is not None and body.queue_mappings_override != live_override:
+        mappings_diff = {
+            "live": live_mappings,
+            "draft": body.queue_mappings or live_mappings,
+            "override_live": live_override,
+            "override_draft": body.queue_mappings_override,
+        }
+        has_changes = True
 
     return DraftDiffResponse(
         cluster_id=cluster_id,
         has_changes=has_changes,
         diffs=diffs,
+        queue_mappings_diff=mappings_diff,
     )
 
 
@@ -209,6 +256,8 @@ async def generate_xml(
         generated_by=user.username,
         comment=body.proposal_comment or "",
         resource_mode=body.resource_mode_override,
+        queue_mappings=body.queue_mappings,
+        queue_mappings_override=body.queue_mappings_override,
     )
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")

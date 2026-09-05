@@ -16,6 +16,8 @@ def generate_capacity_scheduler_xml(
     generated_by: str = "system",
     comment: str = "",
     resource_mode: Optional[str] = None,
+    queue_mappings: Optional[str] = None,
+    queue_mappings_override: Optional[bool] = None,
 ) -> str:
     """
     Генерирует capacity-scheduler.xml из списка QueueDraftItem.
@@ -64,7 +66,9 @@ def generate_capacity_scheduler_xml(
 
         # Для каждой партиции
         for part_name, part_config in q.partitions.items():
-            if mode == "absolute" and path != "root":
+            queue_mode = getattr(q, "resource_mode", None)
+            effective_mode = resource_mode or queue_mode or mode
+            if effective_mode == "absolute" and path != "root":
                 mem = part_config.memory_mb if part_config.memory_mb is not None else int(total_mem * (part_config.capacity / 100.0))
                 cores = part_config.vcores if part_config.vcores is not None else int(total_cores * (part_config.capacity / 100.0))
                 max_mem = part_config.max_memory_mb if part_config.max_memory_mb is not None else int(total_mem * (part_config.max_capacity / 100.0))
@@ -87,6 +91,23 @@ def generate_capacity_scheduler_xml(
 
         # State
         add_prop(f"{prop_prefix}.state", q.state.value)
+
+        # User Limit Factor & Ordering Policy (для листовых очередей)
+        is_leaf = getattr(q, "is_leaf", True) and (path not in children_by_parent or len(children_by_parent[path]) == 0)
+        if is_leaf and path != "root":
+            ulf = getattr(q, "user_limit_factor", None)
+            if ulf is not None:
+                add_prop(f"{prop_prefix}.user-limit-factor", f"{ulf}")
+            ordering_policy = getattr(q, "ordering_policy", None)
+            if ordering_policy:
+                add_prop(f"{prop_prefix}.ordering-policy", str(ordering_policy).lower())
+
+    # Queue Mappings (глобальное свойство)
+    effective_mappings = queue_mappings if queue_mappings is not None else getattr(cluster, "queue_mappings", None)
+    if effective_mappings:
+        add_prop("yarn.scheduler.capacity.queue-mappings", effective_mappings.strip())
+        effective_override = queue_mappings_override if queue_mappings_override is not None else getattr(cluster, "queue_mappings_override", False)
+        add_prop("yarn.scheduler.capacity.queue-mappings-override.enable", "true" if effective_override else "false")
 
     # Генерируем XML строку
     lines = [

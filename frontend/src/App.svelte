@@ -3,7 +3,7 @@
   import { api } from './api/client';
   import type {
     UserSession, ClusterSummary, QueueNode, ClusterMetrics,
-    BranchBalance, DraftQueueItem, DiffItem,
+    BranchBalance, DraftQueueItem, DiffItem, QueueMappingsDiff,
   } from './types';
   import Header from './components/Header.svelte';
   import LoginModal from './components/LoginModal.svelte';
@@ -17,7 +17,8 @@
   import XmlExportModal from './components/XmlExportModal.svelte';
   import SubmitChangeRequestModal from './components/SubmitChangeRequestModal.svelte';
   import ChangeRequestsDrawer from './components/ChangeRequestsDrawer.svelte';
-  import { GitCompareArrows, RotateCcw, FileDown, RefreshCw, Send, GitPullRequest } from 'lucide-svelte';
+  import QueueMappingsModal from './components/QueueMappingsModal.svelte';
+  import { GitCompareArrows, RotateCcw, FileDown, RefreshCw, Send, GitPullRequest, ArrowRightLeft } from 'lucide-svelte';
 
   // Auth state
   let user = $state<UserSession | null>(null);
@@ -33,6 +34,14 @@
   let resourceMode = $state('percentage');
   let displayMode = $state<'percentage' | 'absolute'>('percentage');
   let exportMode = $state<'percentage' | 'absolute'>('percentage');
+
+  // Queue Mappings state
+  let liveQueueMappings = $state<string>('');
+  let liveQueueMappingsOverride = $state<boolean>(false);
+  let draftQueueMappings = $state<string>('');
+  let draftQueueMappingsOverride = $state<boolean>(false);
+  let queueMappingsDiff = $state<QueueMappingsDiff | null>(null);
+  let isMappingsModalOpen = $state(false);
 
   // Draft state
   let draftChanges = $state(new Map<string, DraftQueueItem>());
@@ -60,6 +69,10 @@
   const canWrite = $derived(activeCluster?.can_write || false);
   const canAdmin = $derived(activeCluster?.can_admin || false);
   const draftCount = $derived(draftChanges.size);
+  const isMappingsModified = $derived(
+    draftQueueMappings !== liveQueueMappings || draftQueueMappingsOverride !== liveQueueMappingsOverride
+  );
+  const totalChangesCount = $derived(draftCount + (isMappingsModified ? 1 : 0));
 
   onMount(async () => {
     try {
@@ -96,6 +109,11 @@
       partitions = resp.partitions;
       resourceMode = resp.resource_mode;
       selectedPartition = resp.default_partition;
+      liveQueueMappings = resp.queue_mappings || '';
+      liveQueueMappingsOverride = resp.queue_mappings_override || false;
+      draftQueueMappings = liveQueueMappings;
+      draftQueueMappingsOverride = liveQueueMappingsOverride;
+      queueMappingsDiff = null;
       // Сбрасываем черновик при смене кластера
       draftChanges = new Map();
       await loadPendingCrCount();
@@ -223,7 +241,15 @@
 
   function resetDraft() {
     draftChanges = new Map();
+    draftQueueMappings = liveQueueMappings;
+    draftQueueMappingsOverride = liveQueueMappingsOverride;
+    queueMappingsDiff = null;
     loadQueueTree();
+  }
+
+  function handleSaveMappings(mappings: string, override: boolean) {
+    draftQueueMappings = mappings;
+    draftQueueMappingsOverride = override;
   }
 
   function recalcBalances() {
@@ -285,8 +311,15 @@
     if (!selectedClusterId) return;
     try {
       const draftList = Array.from(draftChanges.values());
-      const resp = await api.getDiff(selectedClusterId, draftList, selectedPartition);
+      const resp = await api.getDiff(
+        selectedClusterId,
+        draftList,
+        selectedPartition,
+        draftQueueMappings,
+        draftQueueMappingsOverride
+      );
       diffs = resp.diffs;
+      queueMappingsDiff = resp.queue_mappings_diff || null;
       showDiffPanel = true;
     } catch (err: any) {
       alert(err.message);
@@ -299,7 +332,14 @@
       const targetMode = mode || exportMode;
       exportMode = targetMode;
       const allQueues = collectAllQueues();
-      const resp = await api.generateXml(selectedClusterId, allQueues, undefined, targetMode);
+      const resp = await api.generateXml(
+        selectedClusterId,
+        allQueues,
+        undefined,
+        targetMode,
+        draftQueueMappings,
+        draftQueueMappingsOverride
+      );
       xmlContent = resp.xml_content;
       xmlFilename = resp.filename;
       xmlInstructions = resp.instructions;
@@ -323,6 +363,8 @@
         is_leaf: node.is_leaf,
         state: draft?.state || node.state,
         partitions: draft?.partitions || node.partitions,
+        user_limit_factor: draft?.user_limit_factor ?? node.user_limit_factor,
+        ordering_policy: draft?.ordering_policy ?? node.ordering_policy,
       });
       for (const child of node.children) {
         recurse(child);
@@ -399,12 +441,25 @@
 
     <ClusterMetricsBar metrics={clusterMetrics} />
 
-    <!-- Toolbar: Partitions and Display Mode -->
+    <!-- Toolbar: Partitions, Queue Balances, Queue Mappings & Display Mode -->
     <div class="bg-white border-b border-slate-200 px-4 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-3 shrink-0">
-      <div class="flex items-center gap-3">
+      <div class="flex items-center gap-3 flex-wrap">
         {#if partitions.length > 1}
           <PartitionSelector {partitions} bind:selectedPartition />
         {/if}
+
+        <ResourceBalanceCard {balances} {resourceMode} {displayMode} inline={true} />
+
+        <button
+          onclick={() => isMappingsModalOpen = true}
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-xs font-medium hover:bg-slate-50 transition cursor-pointer shadow-xs"
+        >
+          <ArrowRightLeft class="w-3.5 h-3.5 text-indigo-600" />
+          <span>Queue Mappings</span>
+          {#if isMappingsModified}
+            <span class="w-2 h-2 rounded-full bg-amber-500" title="Есть несохраненные изменения в правилах маппинга"></span>
+          {/if}
+        </button>
       </div>
 
       <!-- Mode Selector -->
@@ -430,8 +485,6 @@
         </div>
       </div>
     </div>
-
-    <ResourceBalanceCard {balances} {resourceMode} {displayMode} />
 
     {#if isLoading}
       <div class="flex-1 flex items-center justify-center">
@@ -474,19 +527,19 @@
             <RefreshCw class="w-3.5 h-3.5" />
             Обновить
           </button>
-          {#if draftCount > 0}
+          {#if totalChangesCount > 0}
             <button onclick={resetDraft}
               class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 text-red-700 text-xs font-medium hover:bg-red-50 transition cursor-pointer">
               <RotateCcw class="w-3.5 h-3.5" />
-              Сбросить все ({draftCount})
+              Сбросить все ({totalChangesCount})
             </button>
           {/if}
         </div>
 
         <div class="flex items-center gap-2">
-          {#if draftCount > 0}
+          {#if totalChangesCount > 0}
             <span class="text-[11px] text-amber-600 font-medium px-2 py-1 bg-amber-50 border border-amber-200 rounded-lg">
-              {draftCount} изм. в черновике
+              {totalChangesCount} изм. в черновике
             </span>
 
             <button onclick={handleShowDiff}
@@ -535,9 +588,21 @@
 
     <DiffPanel
       {diffs}
+      {queueMappingsDiff}
       {canAdmin}
       bind:isOpen={showDiffPanel}
       onGenerateXml={() => handleGenerateXml()}
+    />
+
+    <QueueMappingsModal
+      rootNode={rootQueue}
+      currentMappings={draftQueueMappings}
+      currentOverride={draftQueueMappingsOverride}
+      liveMappings={liveQueueMappings}
+      liveOverride={liveQueueMappingsOverride}
+      {canWrite}
+      bind:isOpen={isMappingsModalOpen}
+      onSave={handleSaveMappings}
     />
 
     <XmlExportModal

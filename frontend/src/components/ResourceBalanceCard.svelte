@@ -7,18 +7,20 @@
     balances,
     resourceMode,
     displayMode = 'percentage',
+    inline = false,
   }: {
     balances: BranchBalance[];
     resourceMode: string;
     displayMode?: 'percentage' | 'absolute';
+    inline?: boolean;
   } = $props();
 </script>
 
 {#if balances.length > 0}
-  <div class="px-4 sm:px-6 py-2 border-b border-slate-200 bg-white">
-    <div class="flex items-center gap-3 overflow-x-auto">
+  <div class={inline ? "flex items-center gap-2 overflow-x-auto" : "px-4 sm:px-6 py-2 border-b border-slate-200 bg-white"}>
+    <div class="flex items-center gap-2 overflow-x-auto">
       {#each balances as b}
-        <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs shrink-0 {
+        <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs shrink-0 {
           b.is_balanced
             ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
             : b.status === 'overallocated'

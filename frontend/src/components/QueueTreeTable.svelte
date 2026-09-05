@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { QueueNode, DraftQueueItem, PartitionResourceConfig } from '../types';
-  import { ChevronRight, ChevronDown, Folder, FileText, Plus, Trash2, Pencil, Cpu, HardDrive } from 'lucide-svelte';
+  import { ChevronRight, ChevronDown, Folder, FileText, Plus, Trash2, Pencil, Cpu, HardDrive, Hash, Percent } from 'lucide-svelte';
   import { formatMemory, formatVcores } from '../utils/resourceUtils';
 
   let {
@@ -94,11 +94,13 @@
   <table class="w-full text-xs">
     <thead class="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
       <tr class="text-[11px] text-slate-500 font-semibold uppercase tracking-wider">
-        <th class="text-left px-4 py-2.5 min-w-[260px]">Queue</th>
-        <th class="text-center px-2 py-2.5 w-16">Status</th>
+        <th class="text-left px-4 py-2.5 w-full min-w-[260px]">Queue</th>
+        <th class="text-center px-2 py-2.5 w-1 whitespace-nowrap">Status</th>
+        <th class="text-center px-2 py-2.5 w-1 whitespace-nowrap">Mode</th>
+        <th class="text-center px-2 py-2.5 w-1 whitespace-nowrap">Policy</th>
         
         <!-- RAM Capacity -->
-        <th class="text-right px-3 py-2.5 w-32">
+        <th class="text-right px-3 py-2.5 w-1 whitespace-nowrap">
           <div class="flex items-center justify-end gap-1">
             <HardDrive class="w-3.5 h-3.5 text-indigo-500" />
             <span>RAM Cap</span>
@@ -106,7 +108,7 @@
         </th>
 
         <!-- vCPU Capacity -->
-        <th class="text-right px-3 py-2.5 w-32">
+        <th class="text-right px-3 py-2.5 w-1 whitespace-nowrap">
           <div class="flex items-center justify-end gap-1">
             <Cpu class="w-3.5 h-3.5 text-blue-500" />
             <span>vCPU Cap</span>
@@ -114,7 +116,7 @@
         </th>
 
         <!-- RAM Max -->
-        <th class="text-right px-3 py-2.5 w-32">
+        <th class="text-right px-3 py-2.5 w-1 whitespace-nowrap">
           <div class="flex items-center justify-end gap-1">
             <HardDrive class="w-3.5 h-3.5 text-indigo-400" />
             <span>RAM Max</span>
@@ -122,17 +124,17 @@
         </th>
 
         <!-- vCPU Max -->
-        <th class="text-right px-3 py-2.5 w-32">
+        <th class="text-right px-3 py-2.5 w-1 whitespace-nowrap">
           <div class="flex items-center justify-end gap-1">
             <Cpu class="w-3.5 h-3.5 text-blue-400" />
             <span>vCPU Max</span>
           </div>
         </th>
 
-        <th class="text-center px-2 py-2.5 w-20">Elasticity</th>
-        <th class="text-left px-2 py-2.5 w-32">Used</th>
-        <th class="text-center px-2 py-2.5 w-14">Apps</th>
-        <th class="text-center px-2 py-2.5 w-20">Actions</th>
+        <th class="text-center px-2 py-2.5 w-1 whitespace-nowrap">Elasticity</th>
+        <th class="text-left px-3 py-2.5 w-28 whitespace-nowrap">Used</th>
+        <th class="text-center px-2 py-2.5 w-1 whitespace-nowrap">Apps</th>
+        <th class="text-center px-2 py-2.5 w-1 whitespace-nowrap">Actions</th>
       </tr>
     </thead>
     <tbody>
@@ -153,6 +155,10 @@
 
         {@const liveMaxVcore = part ? (part.max_vcore_percent ?? part.max_capacity) : 0}
         {@const draftMaxVcore = draftPart ? (draftPart.max_vcore_percent ?? draftPart.max_capacity) : liveMaxVcore}
+
+        {@const liveMode = row.node.resource_mode || resourceMode || 'percentage'}
+        {@const draftMode = draftItem?.resource_mode || liveMode}
+        {@const isModeChanged = Boolean(draftItem && draftItem.resource_mode && draftItem.resource_mode !== liveMode)}
 
         <tr
           class="border-b border-slate-100 hover:bg-sky-50/40 transition {isDraft ? 'bg-amber-50/30' : ''} {draftItem?.action === 'create' ? 'bg-emerald-50/40' : ''} {draftItem?.action === 'delete' ? 'bg-red-50/40 opacity-60' : ''}"
@@ -194,12 +200,62 @@
           </td>
 
           <!-- Status -->
-          <td class="text-center px-2 py-2">
+          <td class="text-center px-3 py-2 whitespace-nowrap">
             <span class="text-[10px] px-2 py-0.5 rounded-full font-bold {
               row.node.state === 'RUNNING' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
             }">
               {row.node.state}
             </span>
+          </td>
+
+          <!-- Mode (Percentage / Absolute) -->
+          <td class="text-center px-3 py-2 whitespace-nowrap">
+            {#if isModeChanged}
+              <button
+                onclick={() => onEditQueue(row.node)}
+                title="Режим изменен в черновике: {liveMode === 'absolute' ? 'Абсолютный' : 'Процентный'} → {draftMode === 'absolute' ? 'Абсолютный' : 'Процентный'}. Нажмите для редактирования"
+                class="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-mono font-bold bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 transition cursor-pointer shadow-2xs"
+              >
+                <span>{liveMode === 'absolute' ? 'ABS' : '%'}</span>
+                <span>→</span>
+                <span>{draftMode === 'absolute' ? 'ABS' : '%'}</span>
+              </button>
+            {:else if draftMode === 'absolute'}
+              <button
+                onclick={() => onEditQueue(row.node)}
+                title="Режим конфигурации: Абсолютные величины (MB / Cores). Нажмите для редактирования"
+                class="inline-flex items-center justify-center min-w-[32px] text-[10px] px-2 py-0.5 rounded-md font-mono font-bold bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition cursor-pointer shadow-2xs"
+              >
+                <span>ABS</span>
+              </button>
+            {:else}
+              <button
+                onclick={() => onEditQueue(row.node)}
+                title="Режим конфигурации: Проценты (%). Нажмите для редактирования"
+                class="inline-flex items-center justify-center min-w-[32px] text-[10px] px-2 py-0.5 rounded-md font-mono font-bold bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 transition cursor-pointer shadow-2xs"
+              >
+                <span>%</span>
+              </button>
+            {/if}
+          </td>
+
+          <!-- Policy & User Limit Factor (Leaf Queues) -->
+          <td class="text-center px-3 py-2 whitespace-nowrap">
+            {#if row.node.is_leaf}
+              {@const activePolicy = (draftItem?.ordering_policy || row.node.ordering_policy || 'fifo').toUpperCase()}
+              {@const activeUlf = draftItem?.user_limit_factor ?? row.node.user_limit_factor ?? 1.0}
+              <button
+                onclick={() => onEditQueue(row.node)}
+                class="inline-flex items-center justify-center whitespace-nowrap text-[10px] px-2 py-0.5 rounded-md font-mono font-bold transition cursor-pointer shadow-2xs {
+                  activePolicy === 'FAIR' ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100' : 'bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200'
+                }"
+                title="Ordering Policy: {activePolicy} | User Limit Factor: {activeUlf.toFixed(1)}x. Нажмите для редактирования"
+              >
+                {activePolicy}&nbsp;·&nbsp;{activeUlf.toFixed(1)}x
+              </button>
+            {:else}
+              <span class="text-slate-300 text-xs font-mono">—</span>
+            {/if}
           </td>
 
           <!-- RAM Capacity -->

@@ -69,27 +69,39 @@ export const api = {
     return request<QueueTreeResponse>(`/clusters/${clusterId}/queues`);
   },
 
-  async validateDraft(clusterId: string, queues: DraftQueueItem[], partition: string) {
+  async validateDraft(clusterId: string, queues: DraftQueueItem[], partition: string, queueMappings?: string, queueMappingsOverride?: boolean) {
     return request<{ is_valid: boolean; balances: any[]; errors: string[]; warnings: string[] }>(
       `/clusters/${clusterId}/validate`,
       {
         method: 'POST',
-        body: JSON.stringify({ cluster_id: clusterId, selected_partition: partition, queues }),
+        body: JSON.stringify({
+          cluster_id: clusterId,
+          selected_partition: partition,
+          queues,
+          queue_mappings: queueMappings,
+          queue_mappings_override: queueMappingsOverride,
+        }),
       }
     );
   },
 
-  async getDiff(clusterId: string, queues: DraftQueueItem[], partition: string) {
-    return request<{ cluster_id: string; has_changes: boolean; diffs: DiffItem[] }>(
+  async getDiff(clusterId: string, queues: DraftQueueItem[], partition: string, queueMappings?: string, queueMappingsOverride?: boolean) {
+    return request<{ cluster_id: string; has_changes: boolean; diffs: DiffItem[]; queue_mappings_diff?: any }>(
       `/clusters/${clusterId}/diff`,
       {
         method: 'POST',
-        body: JSON.stringify({ cluster_id: clusterId, selected_partition: partition, queues }),
+        body: JSON.stringify({
+          cluster_id: clusterId,
+          selected_partition: partition,
+          queues,
+          queue_mappings: queueMappings,
+          queue_mappings_override: queueMappingsOverride,
+        }),
       }
     );
   },
 
-  async generateXml(clusterId: string, queues: DraftQueueItem[], comment?: string, resourceModeOverride?: string) {
+  async generateXml(clusterId: string, queues: DraftQueueItem[], comment?: string, resourceModeOverride?: string, queueMappings?: string, queueMappingsOverride?: boolean) {
     return request<{
       cluster_id: string; filename: string; xml_content: string;
       applied_by: string; generated_at: string; instructions: string;
@@ -102,6 +114,8 @@ export const api = {
           queues,
           proposal_comment: comment,
           resource_mode_override: resourceModeOverride,
+          queue_mappings: queueMappings,
+          queue_mappings_override: queueMappingsOverride,
         }),
       }
     );

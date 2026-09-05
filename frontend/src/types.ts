@@ -55,6 +55,9 @@ export interface QueueNode {
   parent_path?: string;
   is_leaf: boolean;
   state: 'RUNNING' | 'STOPPED' | 'DRAINING';
+  resource_mode?: 'percentage' | 'absolute' | string;
+  user_limit_factor?: number;
+  ordering_policy?: 'fifo' | 'fair' | string;
   partitions: Record<string, PartitionResourceConfig>;
   current_used_resources: ResourceAllocation;
   allocated_resources: ResourceAllocation;
@@ -104,6 +107,8 @@ export interface QueueTreeResponse {
   root_queue: QueueNode;
   cluster_metrics: ClusterMetrics;
   balances: BranchBalance[];
+  queue_mappings?: string;
+  queue_mappings_override?: boolean;
 }
 
 export interface DraftQueueItem {
@@ -113,7 +118,17 @@ export interface DraftQueueItem {
   action: 'modify' | 'create' | 'delete';
   is_leaf: boolean;
   state: 'RUNNING' | 'STOPPED' | 'DRAINING';
+  resource_mode?: 'percentage' | 'absolute' | string;
+  user_limit_factor?: number;
+  ordering_policy?: 'fifo' | 'fair' | string;
   partitions: Record<string, PartitionResourceConfig>;
+}
+
+export interface QueueMappingsDiff {
+  live?: string;
+  draft?: string;
+  override_live?: boolean;
+  override_draft?: boolean;
 }
 
 export interface DiffItem {
@@ -138,6 +153,12 @@ export interface DiffItem {
   draft_type?: string;
   live_state?: string;
   draft_state?: string;
+  live_resource_mode?: string;
+  draft_resource_mode?: string;
+  live_user_limit_factor?: number;
+  draft_user_limit_factor?: number;
+  live_ordering_policy?: string;
+  draft_ordering_policy?: string;
 }
 
 export interface TokenResponse {

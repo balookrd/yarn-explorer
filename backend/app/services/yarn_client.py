@@ -227,12 +227,23 @@ class YarnClient:
         used_mem = resources_used.get("memory", 0)
         used_cores = resources_used.get("vCores", 0)
 
+        is_abs = bool(queue_json.get("isAbsoluteResource", False))
+        queue_resource_mode = "absolute" if (is_abs or self.cluster.resource_mode == "absolute") else "percentage"
+
+        is_leaf = len(children) == 0
+        ulf = float(queue_json.get("userLimitFactor", 1.0)) if is_leaf else 1.0
+        policy_raw = str(queue_json.get("orderingPolicyInfo") or queue_json.get("orderingPolicy") or "fifo").lower()
+        ordering_policy = "fair" if "fair" in policy_raw else "fifo"
+
         return QueueNode(
             name=name,
             path=path,
             parent_path=parent_path,
-            is_leaf=len(children) == 0,
+            is_leaf=is_leaf,
             state=state,
+            resource_mode=queue_resource_mode,
+            user_limit_factor=ulf,
+            ordering_policy=ordering_policy,
             partitions=partitions,
             current_used_resources=ResourceAllocation(memory_mb=used_mem, vcores=used_cores),
             allocated_resources=ResourceAllocation(memory_mb=used_mem, vcores=used_cores),

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { QueueNode, DraftQueueItem, PartitionResourceConfig } from '../types';
-  import { X, RotateCcw, Save, HardDrive, Cpu, Link, Unlink, Percent, Hash, AlertCircle } from 'lucide-svelte';
+  import { X, RotateCcw, Save, HardDrive, Cpu, Link, Unlink, Percent, Hash, AlertCircle, Users } from 'lucide-svelte';
   import { formatMemory, formatVcores, mbToGb, gbToMb } from '../utils/resourceUtils';
 
   let {
@@ -43,6 +43,9 @@
   let editState = $state<'RUNNING' | 'STOPPED'>('RUNNING');
   let editType = $state<'fixed' | 'elastic'>('elastic');
 
+  let editUserLimitFactor = $state(1.0);
+  let editOrderingPolicy = $state<'fifo' | 'fair'>('fifo');
+
   const totalMem = $derived(clusterResources?.memory_mb || 2097152);
   const totalCores = $derived(clusterResources?.vcores || 1024);
 
@@ -60,6 +63,9 @@
     const part = draft
       ? (draft.partitions[selectedPartition] || draft.partitions['DEFAULT'])
       : (queue.partitions[selectedPartition] || queue.partitions['DEFAULT']);
+
+    const activeMode = draft?.resource_mode || queue.resource_mode || resourceMode || 'percentage';
+    inputMode = activeMode === 'absolute' ? 'absolute' : 'percentage';
 
     if (part) {
       const cap = part.memory_percent ?? part.capacity;
@@ -85,6 +91,10 @@
       isLinked = Math.abs(cap - vcap) < 0.01;
     }
     editState = (draft?.state || queue.state) as 'RUNNING' | 'STOPPED';
+
+    editUserLimitFactor = draft?.user_limit_factor ?? queue.user_limit_factor ?? 1.0;
+    const policy = (draft?.ordering_policy || queue.ordering_policy || 'fifo').toLowerCase();
+    editOrderingPolicy = policy === 'fair' ? 'fair' : 'fifo';
   }
 
   // Заполняем поля только при открытии Drawer или смене очереди
@@ -272,6 +282,9 @@
       action: draftItem?.action || 'modify',
       is_leaf: queue.is_leaf,
       state: editState,
+      resource_mode: inputMode,
+      user_limit_factor: queue.is_leaf ? editUserLimitFactor : undefined,
+      ordering_policy: queue.is_leaf ? editOrderingPolicy : undefined,
       partitions: updatedPartitions,
     };
 
@@ -281,6 +294,13 @@
 
   function handleReset() {
     if (!queue) return;
+    const activeMode = queue.resource_mode || resourceMode || 'percentage';
+    inputMode = activeMode === 'absolute' ? 'absolute' : 'percentage';
+
+    editUserLimitFactor = queue.user_limit_factor ?? 1.0;
+    const policy = (queue.ordering_policy || 'fifo').toLowerCase();
+    editOrderingPolicy = policy === 'fair' ? 'fair' : 'fifo';
+
     const part = queue.partitions[selectedPartition] || queue.partitions['DEFAULT'];
     if (part) {
       const cap = part.memory_percent ?? part.capacity;
@@ -307,6 +327,8 @@
     }
     editState = queue.state as 'RUNNING' | 'STOPPED';
   }
+  const origMode = $derived(queue?.resource_mode || resourceMode || 'percentage');
+  const isModeChanged = $derived(inputMode !== origMode);
 </script>
 
 {#if isOpen && queue}
@@ -324,7 +346,18 @@
     <!-- Header -->
     <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200 bg-slate-50/50">
       <div>
-        <h2 class="text-sm font-bold text-slate-900">Настройки ресурсов очереди</h2>
+        <div class="flex items-center gap-2">
+          <h2 class="text-sm font-bold text-slate-900">Настройки ресурсов очереди</h2>
+          {#if inputMode === 'absolute'}
+            <span class="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded font-mono font-bold bg-purple-100 text-purple-700 border border-purple-200">
+              ABS
+            </span>
+          {:else}
+            <span class="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded font-mono font-bold bg-sky-100 text-sky-700 border border-sky-200">
+              %
+            </span>
+          {/if}
+        </div>
         <p class="text-[11px] text-slate-500 font-mono mt-0.5">{queue.path}</p>
       </div>
       <button
@@ -381,6 +414,13 @@
         {/if}
       </button>
     </div>
+
+    {#if isModeChanged}
+      <div class="px-5 py-2 bg-amber-50 border-b border-amber-200 flex items-center justify-between text-xs text-amber-900">
+        <span>Режим изменен: <strong class="font-semibold">{origMode === 'absolute' ? 'Абсолютный' : 'Процентный'}</strong> → <strong class="font-semibold">{inputMode === 'absolute' ? 'Абсолютный (GB/CPU)' : 'Процентный (%)'}</strong></span>
+        <span class="text-[10px] font-bold bg-amber-200/80 text-amber-900 px-1.5 py-0.5 rounded">В черновике</span>
+      </div>
+    {/if}
 
     <!-- Form Body -->
     <div class="flex-1 overflow-auto px-5 py-4 space-y-5">
@@ -608,6 +648,81 @@
           </div>
         {/if}
       </div>
+
+      <!-- User Limits & Ordering Policy (Leaf Queues Only) -->
+      {#if queue.is_leaf}
+        <div class="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-3">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+            <div class="flex items-center gap-1.5">
+              <Users class="w-4 h-4 text-sky-600" />
+              <span class="text-xs font-bold text-slate-800">Политика планирования и лимиты пользователей</span>
+            </div>
+            <span class="text-[10px] px-1.5 py-0.5 rounded font-mono font-bold bg-slate-100 text-slate-600">Leaf Queue</span>
+          </div>
+
+          <!-- Ordering Policy -->
+          <div>
+            <div class="text-xs font-semibold text-slate-700 mb-1.5">
+              Ordering Policy (политика внутри очереди)
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onclick={() => editOrderingPolicy = 'fifo'}
+                class="flex flex-col items-start p-2 rounded-lg border text-left transition cursor-pointer {
+                  editOrderingPolicy === 'fifo' ? 'bg-sky-50 border-sky-300 text-sky-900 ring-1 ring-sky-400' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-white'
+                }"
+              >
+                <span class="text-xs font-bold font-mono">FIFO</span>
+                <span class="text-[10px] text-slate-500 mt-0.5">В порядке поступления</span>
+              </button>
+              <button
+                type="button"
+                onclick={() => editOrderingPolicy = 'fair'}
+                class="flex flex-col items-start p-2 rounded-lg border text-left transition cursor-pointer {
+                  editOrderingPolicy === 'fair' ? 'bg-indigo-50 border-indigo-300 text-indigo-900 ring-1 ring-indigo-400' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-white'
+                }"
+              >
+                <span class="text-xs font-bold font-mono">FAIR</span>
+                <span class="text-[10px] text-slate-500 mt-0.5">Справедливое разделение</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- User Limit Factor -->
+          <div>
+            <div class="flex items-center justify-between text-xs font-semibold text-slate-700 mb-1">
+              <span>User Limit Factor (ULF)</span>
+              <span class="font-mono text-sky-700 font-bold">{editUserLimitFactor.toFixed(1)}x</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <input
+                type="range"
+                min="0.1"
+                max="5.0"
+                step="0.1"
+                bind:value={editUserLimitFactor}
+                class="flex-1 accent-sky-600 cursor-pointer"
+              />
+              <input
+                type="number"
+                min="0.1"
+                max="10.0"
+                step="0.1"
+                bind:value={editUserLimitFactor}
+                class="w-20 px-2 py-1 text-xs font-mono font-bold text-slate-800 rounded border border-slate-300 text-center outline-none focus:border-sky-500"
+              />
+            </div>
+            <p class="text-[10px] text-slate-500 mt-1">
+              {#if editUserLimitFactor <= 1.0}
+                Один пользователь может занять не более <strong>{(editUserLimitFactor * 100).toFixed(0)}%</strong> от гарантированной емкости очереди.
+              {:else}
+                Пользователь может превышать гарантированную емкость очереди до <strong>{editUserLimitFactor.toFixed(1)}x</strong> при наличии свободных ресурсов кластера.
+              {/if}
+            </p>
+          </div>
+        </div>
+      {/if}
 
       <!-- State -->
       <div>

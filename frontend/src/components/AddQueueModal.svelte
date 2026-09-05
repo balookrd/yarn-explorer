@@ -31,6 +31,8 @@
   let maxVcores = $state(0);
 
   let queueType = $state<'elastic' | 'fixed'>('elastic');
+  let userLimitFactor = $state(1.0);
+  let orderingPolicy = $state<'fifo' | 'fair'>('fifo');
   let error = $state('');
 
   const totalMem = $derived(clusterResources?.memory_mb || 2097152);
@@ -47,6 +49,7 @@
   $effect(() => {
     if (isOpen && !wasOpen) {
       wasOpen = true;
+      inputMode = resourceMode === 'absolute' ? 'absolute' : 'percentage';
       ramGb = mbToGb(Math.round(totalMem * (capacity / 100)));
       vcores = Math.round(totalCores * (capacity / 100));
       maxRamGb = mbToGb(Math.round(totalMem * (maxCapacity / 100)));
@@ -175,6 +178,9 @@
       action: 'create',
       is_leaf: true,
       state: 'RUNNING',
+      resource_mode: inputMode,
+      user_limit_factor: userLimitFactor,
+      ordering_policy: orderingPolicy,
       partitions: { [selectedPartition]: part },
     };
 
@@ -357,6 +363,35 @@
             {/if}
           </div>
         {/if}
+
+        <!-- Ordering Policy & User Limit Factor -->
+        <div class="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+          <div>
+            <label for="add-queue-ordering-policy" class="block text-xs font-semibold text-slate-700 mb-1">Ordering Policy</label>
+            <select
+              id="add-queue-ordering-policy"
+              bind:value={orderingPolicy}
+              class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 outline-none focus:border-sky-500 cursor-pointer"
+            >
+              <option value="fifo">FIFO (в порядке очереди)</option>
+              <option value="fair">FAIR (справедливое)</option>
+            </select>
+          </div>
+          <div>
+            <label for="add-queue-user-limit-factor" class="block text-xs font-semibold text-slate-700 mb-1">
+              User Limit Factor: <span class="font-mono text-sky-700">{userLimitFactor.toFixed(1)}x</span>
+            </label>
+            <input
+              id="add-queue-user-limit-factor"
+              type="number"
+              min="0.1"
+              max="10.0"
+              step="0.1"
+              bind:value={userLimitFactor}
+              class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-mono text-slate-800 outline-none focus:border-sky-500"
+            />
+          </div>
+        </div>
       </div>
 
       <div class="flex items-center gap-2 mt-6">

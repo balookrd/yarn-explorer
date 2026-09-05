@@ -156,3 +156,39 @@ class TestXmlGenerator:
         xml = generate_capacity_scheduler_xml(queues, cluster, resource_mode="absolute")
         assert "[memory=" in xml
         assert "vcores=" in xml
+
+    def test_xml_generation_per_queue_mode(self):
+        cluster = self._make_cluster()  # cluster.resource_mode is "percentage"
+        q1 = _make_queue("prod", "root", 60.0, 90.0)
+        q1.resource_mode = "absolute"
+        q2 = _make_queue("dev", "root", 40.0, 50.0)
+        q2.resource_mode = "percentage"
+        xml = generate_capacity_scheduler_xml([q1, q2], cluster)
+        # q1 should be generated in absolute format
+        assert "yarn.scheduler.capacity.root.prod.capacity" in xml
+        assert "[memory=" in xml
+        # q2 should have percentage format
+        assert "<name>yarn.scheduler.capacity.root.dev.capacity</name>\n    <value>40.0</value>" in xml
+
+    def test_xml_generation_advanced_properties(self):
+        cluster = self._make_cluster()
+        q = _make_queue("prod", "root", 100.0, 100.0)
+        q.is_leaf = True
+        q.user_limit_factor = 2.5
+        q.ordering_policy = "fair"
+
+        xml = generate_capacity_scheduler_xml(
+            [q],
+            cluster,
+            queue_mappings="u:%user:%user,g:devs:root.prod",
+            queue_mappings_override=True,
+        )
+
+        assert "yarn.scheduler.capacity.root.prod.user-limit-factor" in xml
+        assert "<value>2.5</value>" in xml
+        assert "yarn.scheduler.capacity.root.prod.ordering-policy" in xml
+        assert "<value>fair</value>" in xml
+        assert "yarn.scheduler.capacity.queue-mappings" in xml
+        assert "<value>u:%user:%user,g:devs:root.prod</value>" in xml
+        assert "yarn.scheduler.capacity.queue-mappings-override.enable" in xml
+        assert "<value>true</value>" in xml

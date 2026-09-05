@@ -47,6 +47,9 @@ class QueueNode(BaseModel):
     parent_path: Optional[str] = None
     is_leaf: bool = True
     state: QueueState = QueueState.RUNNING
+    resource_mode: str = "percentage"
+    user_limit_factor: Optional[float] = 1.0
+    ordering_policy: Optional[str] = "fifo"
     partitions: Dict[str, PartitionResourceConfig] = Field(default_factory=dict)
     
     # Текущие метрики использования из YARN RM
@@ -101,6 +104,8 @@ class QueueTreeResponse(BaseModel):
     root_queue: QueueNode
     cluster_metrics: ClusterMetrics
     balances: List[BranchBalance]
+    queue_mappings: Optional[str] = None
+    queue_mappings_override: bool = False
 
 
 # Модели для черновиков (Draft), Diff и генерации XML
@@ -111,6 +116,9 @@ class QueueDraftItem(BaseModel):
     action: str = "modify"  # modify | create | delete
     is_leaf: bool = True
     state: QueueState = QueueState.RUNNING
+    resource_mode: Optional[str] = None
+    user_limit_factor: Optional[float] = None
+    ordering_policy: Optional[str] = None
     partitions: Dict[str, PartitionResourceConfig]
 
 
@@ -121,6 +129,8 @@ class DraftValidateRequest(BaseModel):
     cluster_id: str
     selected_partition: str = "DEFAULT"
     queues: List[QueueDraftItem]
+    queue_mappings: Optional[str] = None
+    queue_mappings_override: Optional[bool] = None
 
 
 class DraftValidateResponse(BaseModel):
@@ -161,11 +171,20 @@ class DiffItem(BaseModel):
     live_state: Optional[QueueState] = None
     draft_state: Optional[QueueState] = None
 
+    live_resource_mode: Optional[str] = None
+    draft_resource_mode: Optional[str] = None
+
+    live_user_limit_factor: Optional[float] = None
+    draft_user_limit_factor: Optional[float] = None
+    live_ordering_policy: Optional[str] = None
+    draft_ordering_policy: Optional[str] = None
+
 
 class DraftDiffResponse(BaseModel):
     cluster_id: str
     has_changes: bool
     diffs: List[DiffItem]
+    queue_mappings_diff: Optional[Dict[str, Any]] = None
 
 
 class GenerateXmlRequest(BaseModel):
@@ -173,6 +192,8 @@ class GenerateXmlRequest(BaseModel):
     queues: List[QueueDraftItem]
     proposal_comment: Optional[str] = None
     resource_mode_override: Optional[str] = None  # percentage | absolute
+    queue_mappings: Optional[str] = None
+    queue_mappings_override: Optional[bool] = None
 
 
 class GenerateXmlResponse(BaseModel):

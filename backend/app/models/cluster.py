@@ -36,6 +36,8 @@ class ClusterConfig(BaseModel):
     default_partition: str = "DEFAULT"
     partitions: List[str] = Field(default_factory=lambda: ["DEFAULT"])
     resource_mode: str = "percentage"  # percentage | absolute
+    queue_mappings: Optional[str] = "u:%user:%user,g:hadoop-admins:root.production"
+    queue_mappings_override: bool = False
     total_resources: ClusterResources
     acl: ClusterAcl = Field(default_factory=ClusterAcl)
 
