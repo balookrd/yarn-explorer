@@ -34,6 +34,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Копирование исходного кода backend и конфигурации
 COPY backend/ ./backend/
 COPY config/ ./config/
+COPY demo/ ./demo/
 
 # Копирование собранного Frontend из этапа 1
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist

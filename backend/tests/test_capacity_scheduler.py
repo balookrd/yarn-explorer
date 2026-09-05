@@ -176,6 +176,10 @@ class TestXmlGenerator:
         q.is_leaf = True
         q.user_limit_factor = 2.5
         q.ordering_policy = "fair"
+        q.max_applications = 5000
+        q.max_am_resource_percent = 0.25
+        q.max_parallel_apps = 30
+        q.max_application_lifetime = 86400
 
         xml = generate_capacity_scheduler_xml(
             [q],
@@ -188,7 +192,161 @@ class TestXmlGenerator:
         assert "<value>2.5</value>" in xml
         assert "yarn.scheduler.capacity.root.prod.ordering-policy" in xml
         assert "<value>fair</value>" in xml
+        assert "yarn.scheduler.capacity.root.prod.maximum-applications" in xml
+        assert "<value>5000</value>" in xml
+        assert "yarn.scheduler.capacity.root.prod.maximum-am-resource-percent" in xml
+        assert "<value>0.25</value>" in xml
+        assert "yarn.scheduler.capacity.root.prod.max-parallel-apps" in xml
+        assert "<value>30</value>" in xml
+        assert "yarn.scheduler.capacity.root.prod.maximum-application-lifetime" in xml
+        assert "<value>86400</value>" in xml
         assert "yarn.scheduler.capacity.queue-mappings" in xml
         assert "<value>u:%user:%user,g:devs:root.prod</value>" in xml
         assert "yarn.scheduler.capacity.queue-mappings-override.enable" in xml
         assert "<value>true</value>" in xml
+
+    def test_xml_preserves_unmanaged_properties(self):
+        cluster = self._make_cluster()
+        base_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- Core scheduler parameters -->
+    <property>
+        <name>yarn.scheduler.capacity.resource-calculator</name>
+        <value>org.apache.hadoop.yarn.util.resource.DominantResourceCalculator</value>
+    </property>
+    <property>
+        <name>yarn.scheduler.capacity.schedule-asynchronously.enable</name>
+        <value>true</value>
+    </property>
+    <!-- Production queue settings -->
+    <property>
+        <name>yarn.scheduler.capacity.root.queues</name>
+        <value>prod,dev</value>
+    </property>
+    <property>
+        <name>yarn.scheduler.capacity.root.prod.capacity</name>
+        <value>50.0</value>
+    </property>
+    <property>
+        <name>yarn.scheduler.capacity.root.prod.acl_submit_applications</name>
+        <value>prod-users,analytics-team</value>
+    </property>
+    <property>
+        <name>yarn.scheduler.capacity.root.prod.acl_administer_queue</name>
+        <value>admin_user</value>
+    </property>
+</configuration>"""
+
+        # Модифицируем prod очередь
+        q = _make_queue("prod", "root", 75.0, 95.0)
+        q.max_applications = 8000
+
+        xml = generate_capacity_scheduler_xml(
+            [q],
+            cluster,
+            base_xml=base_xml
+        )
+
+        # Необрабатываемые параметры должны сохраниться!
+        assert "yarn.scheduler.capacity.resource-calculator" in xml
+        assert "org.apache.hadoop.yarn.util.resource.DominantResourceCalculator" in xml
+        assert "yarn.scheduler.capacity.schedule-asynchronously.enable" in xml
+        assert "<value>true</value>" in xml
+        assert "yarn.scheduler.capacity.root.prod.acl_submit_applications" in xml
+        assert "<value>prod-users,analytics-team</value>" in xml
+        assert "yarn.scheduler.capacity.root.prod.acl_administer_queue" in xml
+        assert "<value>admin_user</value>" in xml
+        assert "Core scheduler parameters" in xml
+        assert "Production queue settings" in xml
+
+        # Управляемые параметры должны обновиться
+        assert "yarn.scheduler.capacity.root.prod.capacity" in xml
+        assert "<value>75.0</value>" in xml
+        assert "yarn.scheduler.capacity.root.prod.maximum-capacity" in xml
+        assert "<value>95.0</value>" in xml
+        assert "yarn.scheduler.capacity.root.prod.maximum-applications" in xml
+        assert "<value>8000</value>" in xml
+
+    def test_xml_queue_deletion_preserves_other_queues(self):
+        cluster = self._make_cluster()
+        base_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <property>
+        <name>yarn.scheduler.capacity.resource-calculator</name>
+        <value>org.apache.hadoop.yarn.util.resource.DominantResourceCalculator</value>
+    </property>
+    <property>
+        <name>yarn.scheduler.capacity.root.queues</name>
+        <value>prod,dev</value>
+    </property>
+    <property>
+        <name>yarn.scheduler.capacity.root.prod.capacity</name>
+        <value>60.0</value>
+    </property>
+    <property>
+        <name>yarn.scheduler.capacity.root.dev.capacity</name>
+        <value>40.0</value>
+    </property>
+    <property>
+        <name>yarn.scheduler.capacity.root.dev.acl_submit_applications</name>
+        <value>*</value>
+    </property>
+</configuration>"""
+
+        # Удаляем dev очередь
+        del_q = _make_queue("dev", "root", 0, 0)
+        del_q.action = "delete"
+
+        xml = generate_capacity_scheduler_xml(
+            [del_q],
+            cluster,
+            base_xml=base_xml
+        )
+
+        # dev свойства должны быть удалены
+        assert "yarn.scheduler.capacity.root.dev.capacity" not in xml
+        assert "yarn.scheduler.capacity.root.dev.acl_submit_applications" not in xml
+
+        # prod и resource-calculator должны остаться
+        assert "yarn.scheduler.capacity.resource-calculator" in xml
+        assert "yarn.scheduler.capacity.root.prod.capacity" in xml
+        # Из root.queues dev должен уйти, prod остаться
+        assert "<name>yarn.scheduler.capacity.root.queues</name>\n        <value>prod</value>" in xml or "<value>prod</value>" in xml
+
+    def test_xml_queue_creation_preserves_base_xml(self):
+        cluster = self._make_cluster()
+        base_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <property>
+        <name>yarn.scheduler.capacity.resource-calculator</name>
+        <value>org.apache.hadoop.yarn.util.resource.DominantResourceCalculator</value>
+    </property>
+    <property>
+        <name>yarn.scheduler.capacity.root.queues</name>
+        <value>prod</value>
+    </property>
+    <property>
+        <name>yarn.scheduler.capacity.root.prod.capacity</name>
+        <value>60.0</value>
+    </property>
+</configuration>"""
+
+        # Добавляем ml очередь
+        new_q = _make_queue("ml", "root", 40.0, 50.0)
+        new_q.action = "create"
+
+        xml = generate_capacity_scheduler_xml(
+            [new_q],
+            cluster,
+            base_xml=base_xml
+        )
+
+        # Необрабатываемое свойство на месте
+        assert "yarn.scheduler.capacity.resource-calculator" in xml
+        assert "yarn.scheduler.capacity.root.prod.capacity" in xml
+
+        # Новая очередь добавлена
+        assert "yarn.scheduler.capacity.root.ml.capacity" in xml
+        assert "<value>40.0</value>" in xml
+        assert "ml" in xml
+

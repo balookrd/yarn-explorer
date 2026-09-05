@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { QueueNode, DraftQueueItem, PartitionResourceConfig } from '../types';
-  import { X, RotateCcw, Save, HardDrive, Cpu, Link, Unlink, Percent, Hash, AlertCircle, Users } from 'lucide-svelte';
+  import { X, RotateCcw, Save, HardDrive, Cpu, Link, Unlink, Percent, Hash, AlertCircle, Users, Layers } from 'lucide-svelte';
   import { formatMemory, formatVcores, mbToGb, gbToMb } from '../utils/resourceUtils';
 
   let {
@@ -45,6 +45,11 @@
 
   let editUserLimitFactor = $state(1.0);
   let editOrderingPolicy = $state<'fifo' | 'fair'>('fifo');
+
+  let editMaxApplications = $state<number | null>(null);
+  let editMaxAmPercent = $state<number | null>(null);
+  let editMaxParallelApps = $state<number | null>(null);
+  let editMaxLifetime = $state<number | null>(null);
 
   const totalMem = $derived(clusterResources?.memory_mb || 2097152);
   const totalCores = $derived(clusterResources?.vcores || 1024);
@@ -95,6 +100,11 @@
     editUserLimitFactor = draft?.user_limit_factor ?? queue.user_limit_factor ?? 1.0;
     const policy = (draft?.ordering_policy || queue.ordering_policy || 'fifo').toLowerCase();
     editOrderingPolicy = policy === 'fair' ? 'fair' : 'fifo';
+
+    editMaxApplications = draft?.max_applications ?? queue.max_applications ?? null;
+    editMaxAmPercent = draft?.max_am_resource_percent ?? queue.max_am_resource_percent ?? null;
+    editMaxParallelApps = draft?.max_parallel_apps ?? queue.max_parallel_apps ?? null;
+    editMaxLifetime = draft?.max_application_lifetime ?? queue.max_application_lifetime ?? null;
   }
 
   // Заполняем поля только при открытии Drawer или смене очереди
@@ -285,6 +295,10 @@
       resource_mode: inputMode,
       user_limit_factor: queue.is_leaf ? editUserLimitFactor : undefined,
       ordering_policy: queue.is_leaf ? editOrderingPolicy : undefined,
+      max_applications: editMaxApplications !== null && !isNaN(editMaxApplications) ? editMaxApplications : undefined,
+      max_am_resource_percent: editMaxAmPercent !== null && !isNaN(editMaxAmPercent) ? editMaxAmPercent : undefined,
+      max_parallel_apps: editMaxParallelApps !== null && !isNaN(editMaxParallelApps) ? editMaxParallelApps : undefined,
+      max_application_lifetime: editMaxLifetime !== null && !isNaN(editMaxLifetime) ? editMaxLifetime : undefined,
       partitions: updatedPartitions,
     };
 
@@ -300,6 +314,11 @@
     editUserLimitFactor = queue.user_limit_factor ?? 1.0;
     const policy = (queue.ordering_policy || 'fifo').toLowerCase();
     editOrderingPolicy = policy === 'fair' ? 'fair' : 'fifo';
+
+    editMaxApplications = queue.max_applications ?? null;
+    editMaxAmPercent = queue.max_am_resource_percent ?? null;
+    editMaxParallelApps = queue.max_parallel_apps ?? null;
+    editMaxLifetime = queue.max_application_lifetime ?? null;
 
     const part = queue.partitions[selectedPartition] || queue.partitions['DEFAULT'];
     if (part) {
@@ -723,6 +742,106 @@
           </div>
         </div>
       {/if}
+
+      <!-- Application Limits -->
+      <div class="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-3">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+          <div class="flex items-center gap-1.5">
+            <Layers class="w-4 h-4 text-purple-600" />
+            <span class="text-xs font-bold text-slate-800">Лимиты приложений (Application Limits)</span>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <!-- Maximum Applications -->
+          <div>
+            <label for="edit-max-applications" class="block text-[11px] font-semibold text-slate-700 mb-1">
+              Max Applications
+            </label>
+            <input
+              id="edit-max-applications"
+              type="number"
+              placeholder="Не задано"
+              value={editMaxApplications ?? ''}
+              oninput={(e) => {
+                const v = e.currentTarget.value;
+                editMaxApplications = v === '' ? null : parseInt(v, 10);
+              }}
+              min="0"
+              step="1"
+              class="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-mono text-slate-900 outline-none focus:border-purple-500"
+            />
+            <p class="text-[10px] text-slate-400 mt-0.5">Лимит всех приложений (running + pending)</p>
+          </div>
+
+          <!-- Max Parallel Apps -->
+          <div>
+            <label for="edit-max-parallel-apps" class="block text-[11px] font-semibold text-slate-700 mb-1">
+              Max Parallel Apps
+            </label>
+            <input
+              id="edit-max-parallel-apps"
+              type="number"
+              placeholder="Не задано"
+              value={editMaxParallelApps ?? ''}
+              oninput={(e) => {
+                const v = e.currentTarget.value;
+                editMaxParallelApps = v === '' ? null : parseInt(v, 10);
+              }}
+              min="0"
+              step="1"
+              class="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-mono text-slate-900 outline-none focus:border-purple-500"
+            />
+            <p class="text-[10px] text-slate-400 mt-0.5">Лимит параллельно запущенных (running)</p>
+          </div>
+
+          <!-- Max AM Resource Percent -->
+          <div>
+            <label for="edit-max-am-percent" class="block text-[11px] font-semibold text-slate-700 mb-1">
+              Max AM Resource %
+            </label>
+            <div class="relative">
+              <input
+                id="edit-max-am-percent"
+                type="number"
+                placeholder="20"
+                value={editMaxAmPercent !== null ? (editMaxAmPercent <= 1 ? +(editMaxAmPercent * 100).toFixed(1) : editMaxAmPercent) : ''}
+                oninput={(e) => {
+                  const v = e.currentTarget.value;
+                  editMaxAmPercent = v === '' ? null : (parseFloat(v) / 100);
+                }}
+                min="0"
+                max="100"
+                step="1"
+                class="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-mono text-slate-900 outline-none focus:border-purple-500"
+              />
+              <span class="absolute right-3 top-1.5 text-xs font-bold text-slate-400">%</span>
+            </div>
+            <p class="text-[10px] text-slate-400 mt-0.5">Макс. доля ресурсов на Application Masters</p>
+          </div>
+
+          <!-- Max Application Lifetime -->
+          <div>
+            <label for="edit-max-lifetime" class="block text-[11px] font-semibold text-slate-700 mb-1">
+              Max App Lifetime (сек)
+            </label>
+            <input
+              id="edit-max-lifetime"
+              type="number"
+              placeholder="Не задано"
+              value={editMaxLifetime ?? ''}
+              oninput={(e) => {
+                const v = e.currentTarget.value;
+                editMaxLifetime = v === '' ? null : parseInt(v, 10);
+              }}
+              min="-1"
+              step="1"
+              class="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-mono text-slate-900 outline-none focus:border-purple-500"
+            />
+            <p class="text-[10px] text-slate-400 mt-0.5">Время жизни (-1 = бессрочно, 86400 = 24ч)</p>
+          </div>
+        </div>
+      </div>
 
       <!-- State -->
       <div>

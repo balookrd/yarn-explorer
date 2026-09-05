@@ -140,6 +140,18 @@ async def get_diff(
         live_ordering = getattr(live_q, "ordering_policy", None) if live_q else None
         draft_ordering = draft_q.ordering_policy
 
+        live_max_apps = getattr(live_q, "max_applications", None) if live_q else None
+        draft_max_apps = draft_q.max_applications
+
+        live_max_am = getattr(live_q, "max_am_resource_percent", None) if live_q else None
+        draft_max_am = draft_q.max_am_resource_percent
+
+        live_max_parallel = getattr(live_q, "max_parallel_apps", None) if live_q else None
+        draft_max_parallel = draft_q.max_parallel_apps
+
+        live_lifetime = getattr(live_q, "max_application_lifetime", None) if live_q else None
+        draft_lifetime = draft_q.max_application_lifetime
+
         if draft_q.action == "create":
             action = "created"
         elif draft_q.action == "delete":
@@ -158,6 +170,14 @@ async def get_diff(
             if draft_ulf is not None and live_ulf is not None and abs(draft_ulf - live_ulf) > 0.001:
                 has_changes = True
             if draft_ordering and live_ordering and draft_ordering.lower() != live_ordering.lower():
+                has_changes = True
+            if draft_max_apps is not None and draft_max_apps != live_max_apps:
+                has_changes = True
+            if draft_max_am is not None and (live_max_am is None or abs(draft_max_am - live_max_am) > 0.001):
+                has_changes = True
+            if draft_max_parallel is not None and draft_max_parallel != live_max_parallel:
+                has_changes = True
+            if draft_lifetime is not None and draft_lifetime != live_lifetime:
                 has_changes = True
             action = "modified" if has_changes else "unchanged"
         else:
@@ -203,6 +223,14 @@ async def get_diff(
             draft_user_limit_factor=draft_ulf,
             live_ordering_policy=live_ordering,
             draft_ordering_policy=draft_ordering,
+            live_max_applications=live_max_apps,
+            draft_max_applications=draft_max_apps,
+            live_max_am_resource_percent=live_max_am,
+            draft_max_am_resource_percent=draft_max_am,
+            live_max_parallel_apps=live_max_parallel,
+            draft_max_parallel_apps=draft_max_parallel,
+            live_max_application_lifetime=live_lifetime,
+            draft_max_application_lifetime=draft_lifetime,
         ))
 
     has_changes = any(d.action != "unchanged" for d in diffs)
@@ -250,6 +278,22 @@ async def generate_xml(
     cluster = _find_cluster(cluster_id)
     check_cluster_permission(user, cluster, Role.ADMIN)
 
+    base_xml: Optional[str] = None
+    if settings.auth.mode == "mock":
+        from app.services.mock_yarn import get_mock_capacity_scheduler_xml
+        base_xml = get_mock_capacity_scheduler_xml(cluster)
+    else:
+        try:
+            from app.services.yarn_client import YarnClient
+            client = YarnClient(cluster)
+            base_xml = await client.get_capacity_scheduler_xml(do_as=user.username)
+        except Exception as e:
+            logger.warning(f"Не удалось получить текущий capacity-scheduler.xml из YARN: {e}")
+
+    if not base_xml:
+        from app.services.mock_yarn import get_mock_capacity_scheduler_xml
+        base_xml = get_mock_capacity_scheduler_xml(cluster)
+
     xml_content = generate_capacity_scheduler_xml(
         queues=body.queues,
         cluster=cluster,
@@ -258,6 +302,7 @@ async def generate_xml(
         resource_mode=body.resource_mode_override,
         queue_mappings=body.queue_mappings,
         queue_mappings_override=body.queue_mappings_override,
+        base_xml=base_xml,
     )
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")

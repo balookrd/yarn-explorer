@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { DraftQueueItem, PartitionResourceConfig } from '../types';
-  import { X, Plus, HardDrive, Cpu, Percent, Hash } from 'lucide-svelte';
+  import { X, Plus, HardDrive, Cpu, Percent, Hash, Layers } from 'lucide-svelte';
   import { formatMemory, formatVcores, mbToGb, gbToMb } from '../utils/resourceUtils';
 
   let {
@@ -33,6 +33,12 @@
   let queueType = $state<'elastic' | 'fixed'>('elastic');
   let userLimitFactor = $state(1.0);
   let orderingPolicy = $state<'fifo' | 'fair'>('fifo');
+
+  let maxApplications = $state<number | null>(null);
+  let maxParallelApps = $state<number | null>(null);
+  let maxAmPercent = $state<number | null>(null);
+  let maxLifetime = $state<number | null>(null);
+
   let error = $state('');
 
   const totalMem = $derived(clusterResources?.memory_mb || 2097152);
@@ -181,6 +187,10 @@
       resource_mode: inputMode,
       user_limit_factor: userLimitFactor,
       ordering_policy: orderingPolicy,
+      max_applications: maxApplications !== null && !isNaN(maxApplications) ? maxApplications : undefined,
+      max_am_resource_percent: maxAmPercent !== null && !isNaN(maxAmPercent) ? maxAmPercent : undefined,
+      max_parallel_apps: maxParallelApps !== null && !isNaN(maxParallelApps) ? maxParallelApps : undefined,
+      max_application_lifetime: maxLifetime !== null && !isNaN(maxLifetime) ? maxLifetime : undefined,
       partitions: { [selectedPartition]: part },
     };
 
@@ -190,14 +200,18 @@
     capacity = 10;
     maxCapacity = 20;
     queueType = 'elastic';
+    maxApplications = null;
+    maxParallelApps = null;
+    maxAmPercent = null;
+    maxLifetime = null;
     error = '';
     isOpen = false;
   }
 </script>
 
 {#if isOpen}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
-    <div class="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-lg">
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+    <div class="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-lg max-h-[90vh] flex flex-col">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-sm font-bold text-slate-900">Создание новой очереди</h2>
         <button onclick={() => isOpen = false} class="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 cursor-pointer">
@@ -234,7 +248,7 @@
         <div class="mb-4 p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs">{error}</div>
       {/if}
 
-      <div class="space-y-4">
+      <div class="space-y-4 flex-1 overflow-y-auto pr-1">
         <div>
           <label for="new-queue-name" class="block text-xs font-semibold text-slate-700 mb-1">Имя очереди</label>
           <input
@@ -390,6 +404,88 @@
               bind:value={userLimitFactor}
               class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-mono text-slate-800 outline-none focus:border-sky-500"
             />
+          </div>
+        </div>
+
+        <!-- Application Limits (Optional) -->
+        <div class="pt-2 border-t border-slate-100">
+          <div class="flex items-center gap-1.5 mb-2">
+            <Layers class="w-3.5 h-3.5 text-purple-600" />
+            <span class="text-xs font-semibold text-slate-800">Лимиты приложений (опционально)</span>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label for="add-max-applications" class="block text-[10px] text-slate-500 mb-0.5">Max Applications</label>
+              <input
+                id="add-max-applications"
+                type="number"
+                placeholder="10000"
+                value={maxApplications ?? ''}
+                oninput={(e) => {
+                  const v = e.currentTarget.value;
+                  maxApplications = v === '' ? null : parseInt(v, 10);
+                }}
+                min="0"
+                step="1"
+                class="w-full px-2 py-1 rounded border border-slate-300 bg-white text-xs font-mono text-slate-800 outline-none focus:border-purple-500"
+              />
+            </div>
+
+            <div>
+              <label for="add-max-parallel-apps" class="block text-[10px] text-slate-500 mb-0.5">Max Parallel Apps</label>
+              <input
+                id="add-max-parallel-apps"
+                type="number"
+                placeholder="50"
+                value={maxParallelApps ?? ''}
+                oninput={(e) => {
+                  const v = e.currentTarget.value;
+                  maxParallelApps = v === '' ? null : parseInt(v, 10);
+                }}
+                min="0"
+                step="1"
+                class="w-full px-2 py-1 rounded border border-slate-300 bg-white text-xs font-mono text-slate-800 outline-none focus:border-purple-500"
+              />
+            </div>
+
+            <div>
+              <label for="add-max-am-percent" class="block text-[10px] text-slate-500 mb-0.5">Max AM Resource %</label>
+              <div class="relative">
+                <input
+                  id="add-max-am-percent"
+                  type="number"
+                  placeholder="20"
+                  value={maxAmPercent !== null ? (maxAmPercent <= 1 ? +(maxAmPercent * 100).toFixed(1) : maxAmPercent) : ''}
+                  oninput={(e) => {
+                    const v = e.currentTarget.value;
+                    maxAmPercent = v === '' ? null : (parseFloat(v) / 100);
+                  }}
+                  min="0"
+                  max="100"
+                  step="1"
+                  class="w-full px-2 py-1 rounded border border-slate-300 bg-white text-xs font-mono text-slate-800 outline-none focus:border-purple-500"
+                />
+                <span class="absolute right-2 top-1 text-[10px] font-bold text-slate-400">%</span>
+              </div>
+            </div>
+
+            <div>
+              <label for="add-max-lifetime" class="block text-[10px] text-slate-500 mb-0.5">Max App Lifetime (сек)</label>
+              <input
+                id="add-max-lifetime"
+                type="number"
+                placeholder="86400"
+                value={maxLifetime ?? ''}
+                oninput={(e) => {
+                  const v = e.currentTarget.value;
+                  maxLifetime = v === '' ? null : parseInt(v, 10);
+                }}
+                min="-1"
+                step="1"
+                class="w-full px-2 py-1 rounded border border-slate-300 bg-white text-xs font-mono text-slate-800 outline-none focus:border-purple-500"
+              />
+            </div>
           </div>
         </div>
       </div>

@@ -1,5 +1,7 @@
+import os
 import logging
 from typing import List, Optional, Tuple
+from pathlib import Path
 import httpx
 
 from app.models.cluster import ClusterConfig
@@ -47,6 +49,14 @@ class YarnClient:
         resp.raise_for_status()
         return resp.json()
 
+    def _execute_kerberos_get_text(self, url: str, params: dict, headers: Optional[dict] = None) -> str:
+        """Синхронный GET запрос с SPNEGO аутентификацией, возвращающий текстовый ответ."""
+        kerberos_manager.ensure_service_ticket()
+        session = _get_kerberos_session()
+        resp = session.get(url, params=params, headers=headers, timeout=15.0)
+        resp.raise_for_status()
+        return resp.text
+
     async def _http_get(self, url: str, params: Optional[dict] = None) -> dict:
         """Выполняет GET запрос (с Kerberos или без в зависимости от конфигурации)."""
         params = params or {}
@@ -57,6 +67,18 @@ class YarnClient:
                 resp = await client.get(url, params=params)
                 resp.raise_for_status()
                 return resp.json()
+
+    async def _http_get_text(self, url: str, params: Optional[dict] = None, headers: Optional[dict] = None) -> str:
+        """Выполняет GET запрос и возвращает текст."""
+        params = params or {}
+        headers = headers or {}
+        if self.cluster.kerberos_enabled:
+            return await asyncio.to_thread(self._execute_kerberos_get_text, url, params, headers)
+        else:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(url, params=params, headers=headers)
+                resp.raise_for_status()
+                return resp.text
 
     async def _get_active_rm(self) -> str:
         """Определяет активный ResourceManager из списка URL."""
@@ -235,6 +257,18 @@ class YarnClient:
         policy_raw = str(queue_json.get("orderingPolicyInfo") or queue_json.get("orderingPolicy") or "fifo").lower()
         ordering_policy = "fair" if "fair" in policy_raw else "fifo"
 
+        max_apps_raw = queue_json.get("maxApplications")
+        max_apps = int(max_apps_raw) if max_apps_raw is not None else None
+
+        max_am_raw = queue_json.get("maxAMResourcePerQueuePercent") or queue_json.get("maxAMResourcePercent")
+        max_am = float(max_am_raw) if max_am_raw is not None else None
+
+        max_parallel_raw = queue_json.get("maxParallelApps")
+        max_parallel = int(max_parallel_raw) if max_parallel_raw is not None else None
+
+        lifetime_raw = queue_json.get("maxApplicationLifetime") or queue_json.get("maximumApplicationLifetime")
+        lifetime = int(lifetime_raw) if lifetime_raw is not None else None
+
         return QueueNode(
             name=name,
             path=path,
@@ -244,6 +278,10 @@ class YarnClient:
             resource_mode=queue_resource_mode,
             user_limit_factor=ulf,
             ordering_policy=ordering_policy,
+            max_applications=max_apps,
+            max_am_resource_percent=max_am,
+            max_parallel_apps=max_parallel,
+            max_application_lifetime=lifetime,
             partitions=partitions,
             current_used_resources=ResourceAllocation(memory_mb=used_mem, vcores=used_cores),
             allocated_resources=ResourceAllocation(memory_mb=used_mem, vcores=used_cores),
@@ -263,3 +301,54 @@ class YarnClient:
         root_queue = self._parse_queue_tree(scheduler_info)
 
         return root_queue, metrics
+
+    async def get_capacity_scheduler_xml(self, do_as: str = "") -> Optional[str]:
+        """
+        Получает текущий capacity-scheduler.xml из YARN.
+        1. Сначала пытается запросить активный RM через /ws/v1/cluster/scheduler-conf
+        2. При ошибке или недоступности пробует прочитать локальный файл кластера.
+        """
+        params = self._build_params(do_as)
+        headers = {"Accept": "application/xml, text/xml"}
+
+        # 1. Попытка через REST API RM
+        for attempt in range(len(self.cluster.resource_manager_urls)):
+            try:
+                rm_url = await self._get_active_rm()
+                url = f"{rm_url}/ws/v1/cluster/scheduler-conf"
+                text = await self._http_get_text(url, params=params, headers=headers)
+                if text and "<configuration" in text:
+                    logger.info(f"Успешно получен capacity-scheduler.xml из RM REST API: {rm_url}")
+                    return text
+            except Exception as e:
+                logger.debug(f"Не удалось получить scheduler-conf из RM: {e}")
+                self._active_rm_url = None
+
+        # 2. Попытка прочитать локальный файл конфигурации кластера
+        candidates: List[str] = []
+        if self.cluster.capacity_scheduler_xml_path:
+            candidates.append(self.cluster.capacity_scheduler_xml_path)
+
+        # Стандартные пути для демо и локальных окружений
+        candidates.extend([
+            f"demo/{self.cluster.id}/capacity-scheduler.xml",
+            "demo/cluster-1/capacity-scheduler.xml" if "1" in self.cluster.id or "prod" in self.cluster.id else "demo/cluster-2/capacity-scheduler.xml",
+            f"/app/demo/{self.cluster.id}/capacity-scheduler.xml",
+            "/app/demo/cluster-1/capacity-scheduler.xml" if "1" in self.cluster.id or "prod" in self.cluster.id else "/app/demo/cluster-2/capacity-scheduler.xml",
+            "/opt/hadoop/etc/hadoop/capacity-scheduler.xml",
+            "/etc/hadoop/conf/capacity-scheduler.xml",
+        ])
+
+        for path_str in candidates:
+            p = Path(path_str)
+            if p.is_file():
+                try:
+                    content = p.read_text(encoding="utf-8")
+                    if "<configuration" in content:
+                        logger.info(f"Загружен базовый capacity-scheduler.xml из файла: {path_str}")
+                        return content
+                except Exception as ex:
+                    logger.warning(f"Ошибка чтения файла {path_str}: {ex}")
+
+        logger.warning(f"Базовый capacity-scheduler.xml для кластера {self.cluster.id} не найден.")
+        return None

@@ -50,6 +50,10 @@ class QueueNode(BaseModel):
     resource_mode: str = "percentage"
     user_limit_factor: Optional[float] = 1.0
     ordering_policy: Optional[str] = "fifo"
+    max_applications: Optional[int] = None
+    max_am_resource_percent: Optional[float] = None
+    max_parallel_apps: Optional[int] = None
+    max_application_lifetime: Optional[int] = None
     partitions: Dict[str, PartitionResourceConfig] = Field(default_factory=dict)
     
     # Текущие метрики использования из YARN RM
@@ -119,6 +123,10 @@ class QueueDraftItem(BaseModel):
     resource_mode: Optional[str] = None
     user_limit_factor: Optional[float] = None
     ordering_policy: Optional[str] = None
+    max_applications: Optional[int] = None
+    max_am_resource_percent: Optional[float] = None
+    max_parallel_apps: Optional[int] = None
+    max_application_lifetime: Optional[int] = None
     partitions: Dict[str, PartitionResourceConfig]
 
 
@@ -178,6 +186,15 @@ class DiffItem(BaseModel):
     draft_user_limit_factor: Optional[float] = None
     live_ordering_policy: Optional[str] = None
     draft_ordering_policy: Optional[str] = None
+
+    live_max_applications: Optional[int] = None
+    draft_max_applications: Optional[int] = None
+    live_max_am_resource_percent: Optional[float] = None
+    draft_max_am_resource_percent: Optional[float] = None
+    live_max_parallel_apps: Optional[int] = None
+    draft_max_parallel_apps: Optional[int] = None
+    live_max_application_lifetime: Optional[int] = None
+    draft_max_application_lifetime: Optional[int] = None
 
 
 class DraftDiffResponse(BaseModel):

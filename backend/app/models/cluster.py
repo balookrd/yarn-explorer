@@ -38,6 +38,7 @@ class ClusterConfig(BaseModel):
     resource_mode: str = "percentage"  # percentage | absolute
     queue_mappings: Optional[str] = "u:%user:%user,g:hadoop-admins:root.production"
     queue_mappings_override: bool = False
+    capacity_scheduler_xml_path: Optional[str] = None
     total_resources: ClusterResources
     acl: ClusterAcl = Field(default_factory=ClusterAcl)
 

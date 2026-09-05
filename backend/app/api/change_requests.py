@@ -204,12 +204,30 @@ async def approve_change_request(
             queue_map[draft_q.path] = draft_q
 
     all_queues = list(queue_map.values())
+
+    base_xml: Optional[str] = None
+    if settings.auth.mode == "mock":
+        from app.services.mock_yarn import get_mock_capacity_scheduler_xml
+        base_xml = get_mock_capacity_scheduler_xml(cluster)
+    else:
+        try:
+            from app.services.yarn_client import YarnClient
+            client = YarnClient(cluster)
+            base_xml = await client.get_capacity_scheduler_xml(do_as=current_user.username)
+        except Exception as e:
+            logger.warning(f"Не удалось получить текущий capacity-scheduler.xml из YARN: {e}")
+
+    if not base_xml:
+        from app.services.mock_yarn import get_mock_capacity_scheduler_xml
+        base_xml = get_mock_capacity_scheduler_xml(cluster)
+
     xml_content = generate_capacity_scheduler_xml(
         queues=all_queues,
         cluster=cluster,
         generated_by=f"{cr.author} (Approved by {current_user.username})",
         comment=review.comment or f"Approved Change Request #{cr.id}: {cr.title}",
         resource_mode=cluster.resource_mode,
+        base_xml=base_xml,
     )
 
     success = storage_service.approve_change_request(

@@ -128,7 +128,7 @@ services:
       - DB_PATH=/app/data/yarn_explorer.db
       - PYTHONUNBUFFERED=1
     volumes:
-      - ./demo/config.yaml:/app/demo/config.yaml:ro
+      - ./demo:/app/demo:ro
       - yarn-demo-shared-krb5:/shared-krb5:ro
       - yarn-demo-shared-keytabs:/etc/security/keytabs:ro
       - yarn-demo-data:/app/data

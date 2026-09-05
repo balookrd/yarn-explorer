@@ -58,6 +58,10 @@ export interface QueueNode {
   resource_mode?: 'percentage' | 'absolute' | string;
   user_limit_factor?: number;
   ordering_policy?: 'fifo' | 'fair' | string;
+  max_applications?: number;
+  max_am_resource_percent?: number;
+  max_parallel_apps?: number;
+  max_application_lifetime?: number;
   partitions: Record<string, PartitionResourceConfig>;
   current_used_resources: ResourceAllocation;
   allocated_resources: ResourceAllocation;
@@ -121,6 +125,10 @@ export interface DraftQueueItem {
   resource_mode?: 'percentage' | 'absolute' | string;
   user_limit_factor?: number;
   ordering_policy?: 'fifo' | 'fair' | string;
+  max_applications?: number;
+  max_am_resource_percent?: number;
+  max_parallel_apps?: number;
+  max_application_lifetime?: number;
   partitions: Record<string, PartitionResourceConfig>;
 }
 
@@ -159,6 +167,14 @@ export interface DiffItem {
   draft_user_limit_factor?: number;
   live_ordering_policy?: string;
   draft_ordering_policy?: string;
+  live_max_applications?: number;
+  draft_max_applications?: number;
+  live_max_am_resource_percent?: number;
+  draft_max_am_resource_percent?: number;
+  live_max_parallel_apps?: number;
+  draft_max_parallel_apps?: number;
+  live_max_application_lifetime?: number;
+  draft_max_application_lifetime?: number;
 }
 
 export interface TokenResponse {

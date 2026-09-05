@@ -114,6 +114,26 @@
                         Ordering Policy: <span class="font-bold">{d.live_ordering_policy ?? 'fifo'} → {d.draft_ordering_policy}</span>
                       </div>
                     {/if}
+                    {#if d.draft_max_applications != null && d.live_max_applications !== d.draft_max_applications}
+                      <div class="text-[10px] text-indigo-700 font-sans mt-0.5">
+                        Max Apps: <span class="font-bold">{d.live_max_applications ?? '—'} → {d.draft_max_applications}</span>
+                      </div>
+                    {/if}
+                    {#if d.draft_max_parallel_apps != null && d.live_max_parallel_apps !== d.draft_max_parallel_apps}
+                      <div class="text-[10px] text-indigo-700 font-sans mt-0.5">
+                        Max Parallel Apps: <span class="font-bold">{d.live_max_parallel_apps ?? '—'} → {d.draft_max_parallel_apps}</span>
+                      </div>
+                    {/if}
+                    {#if d.draft_max_am_resource_percent != null && d.live_max_am_resource_percent !== d.draft_max_am_resource_percent}
+                      <div class="text-[10px] text-indigo-700 font-sans mt-0.5">
+                        Max AM %: <span class="font-bold">{d.live_max_am_resource_percent != null ? `${(d.live_max_am_resource_percent <= 1 ? d.live_max_am_resource_percent * 100 : d.live_max_am_resource_percent).toFixed(1)}%` : '—'} → {(d.draft_max_am_resource_percent <= 1 ? d.draft_max_am_resource_percent * 100 : d.draft_max_am_resource_percent).toFixed(1)}%</span>
+                      </div>
+                    {/if}
+                    {#if d.draft_max_application_lifetime != null && d.live_max_application_lifetime !== d.draft_max_application_lifetime}
+                      <div class="text-[10px] text-indigo-700 font-sans mt-0.5">
+                        Max Lifetime: <span class="font-bold">{d.live_max_application_lifetime ?? '—'}s → {d.draft_max_application_lifetime}s</span>
+                      </div>
+                    {/if}
                   </td>
                   <td class="text-center px-2 py-2">
                     <span class="text-[10px] px-2 py-0.5 rounded-full font-bold capitalize {actionBadge(d.action)}">{d.action}</span>

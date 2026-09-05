@@ -365,6 +365,10 @@
         partitions: draft?.partitions || node.partitions,
         user_limit_factor: draft?.user_limit_factor ?? node.user_limit_factor,
         ordering_policy: draft?.ordering_policy ?? node.ordering_policy,
+        max_applications: draft?.max_applications ?? node.max_applications,
+        max_am_resource_percent: draft?.max_am_resource_percent ?? node.max_am_resource_percent,
+        max_parallel_apps: draft?.max_parallel_apps ?? node.max_parallel_apps,
+        max_application_lifetime: draft?.max_application_lifetime ?? node.max_application_lifetime,
       });
       for (const child of node.children) {
         recurse(child);

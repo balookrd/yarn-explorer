@@ -1,4 +1,4 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from app.models.yarn import (
     QueueNode, QueueState, QueueType, PartitionResourceConfig,
     ResourceAllocation, ClusterMetrics, BranchBalance
@@ -91,6 +91,10 @@ def get_mock_queue_tree(cluster: ClusterConfig) -> QueueNode:
         state=QueueState.RUNNING,
         user_limit_factor=2.0,
         ordering_policy="fair",
+        max_applications=10000,
+        max_am_resource_percent=0.3,
+        max_parallel_apps=50,
+        max_application_lifetime=86400,
         partitions=spark_parts,
         allocated_resources=ResourceAllocation(memory_mb=int(total_mem * 0.24), vcores=int(total_cores * 0.22)),
         current_used_resources=ResourceAllocation(memory_mb=int(total_mem * 0.21), vcores=int(total_cores * 0.19)),
@@ -109,6 +113,10 @@ def get_mock_queue_tree(cluster: ClusterConfig) -> QueueNode:
         state=QueueState.RUNNING,
         user_limit_factor=1.0,
         ordering_policy="fifo",
+        max_applications=5000,
+        max_am_resource_percent=0.2,
+        max_parallel_apps=20,
+        max_application_lifetime=43200,
         partitions={"DEFAULT": make_part(35.0, 50.0)},
         allocated_resources=ResourceAllocation(memory_mb=int(total_mem * 0.21), vcores=int(total_cores * 0.20)),
         current_used_resources=ResourceAllocation(memory_mb=int(total_mem * 0.18), vcores=int(total_cores * 0.17)),
@@ -127,6 +135,10 @@ def get_mock_queue_tree(cluster: ClusterConfig) -> QueueNode:
         state=QueueState.RUNNING,
         user_limit_factor=1.5,
         ordering_policy="fair",
+        max_applications=2000,
+        max_am_resource_percent=0.25,
+        max_parallel_apps=15,
+        max_application_lifetime=3600,
         partitions={"DEFAULT": make_part(25.0, 25.0)},  # Фиксированная очередь
         allocated_resources=ResourceAllocation(memory_mb=int(total_mem * 0.15), vcores=int(total_cores * 0.15)),
         current_used_resources=ResourceAllocation(memory_mb=int(total_mem * 0.12), vcores=int(total_cores * 0.12)),
@@ -244,3 +256,21 @@ def get_mock_queue_tree(cluster: ClusterConfig) -> QueueNode:
 
     _apply_resource_mode(root_queue)
     return root_queue
+
+
+def get_mock_capacity_scheduler_xml(cluster: ClusterConfig) -> Optional[str]:
+    """Возвращает базовый capacity-scheduler.xml для mock-режима/демо кластера."""
+    from pathlib import Path
+    candidates = [
+        cluster.capacity_scheduler_xml_path if cluster.capacity_scheduler_xml_path else None,
+        f"demo/{cluster.id}/capacity-scheduler.xml",
+        "demo/cluster-1/capacity-scheduler.xml" if "1" in cluster.id or "prod" in cluster.id else "demo/cluster-2/capacity-scheduler.xml",
+        f"/app/demo/{cluster.id}/capacity-scheduler.xml",
+        "/app/demo/cluster-1/capacity-scheduler.xml" if "1" in cluster.id or "prod" in cluster.id else "/app/demo/cluster-2/capacity-scheduler.xml",
+    ]
+    for c in candidates:
+        if c:
+            p = Path(c)
+            if p.is_file():
+                return p.read_text(encoding="utf-8")
+    return None
