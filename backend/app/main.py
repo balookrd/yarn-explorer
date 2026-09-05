@@ -54,6 +54,13 @@ app.include_router(clusters_router)
 app.include_router(queues_router)
 app.include_router(change_requests_router)
 
+
+@app.get("/health", tags=["system"])
+async def health_check():
+    """Проверка жизнеспособности для Kubernetes liveness/readiness probes."""
+    return {"status": "ok"}
+
+
 # Статика фронтенда
 frontend_dist = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")
 if os.path.isdir(frontend_dist):

@@ -241,6 +241,120 @@ clusters:
 
 ---
 
+## ☸️ Развертывание в Kubernetes (Helm)
+
+Для развертывания YARN Queue Explorer в кластере Kubernetes подготовлен готовый к production Helm-чарт в директории `helm/yarn-explorer`.
+
+### Возможности чарта:
+- **Безопасность**: Запуск от непривилегированного пользователя (`non-root`, UID 10001, `readOnlyRootFilesystem: false`).
+- **Персистентность**: Поддержка `PersistentVolumeClaim` для хранения локальной базы данных заявок SQLite (`/app/data/yarn_explorer.db`). При включенном PVC стратегия деплоя автоматически переключается на `Recreate`.
+- **Kerberos / SPNEGO**:
+  - Монтирование пользовательского `krb5.conf` через ConfigMap.
+  - Поддержка создания K8s Secret с `keytab` (из base64-строки) или подключение уже существующего секрета (`existingSecret`).
+- **Ingress**: Поддержка Ingress-контроллеров (включая `ingress-nginx`) с TLS-терминацией.
+- **Health Probes**: Настроенные Liveness и Readiness пробы по эндпоинту `/health`.
+- **Автоматический перезапуск подов**: При обновлении содержимого `config.yaml` или `krb5.conf` контроллер Deployment перезапускает поды за счет контрольных сумм в аннотациях (`checksum/config`, `checksum/krb5`).
+
+### Быстрая установка:
+
+```bash
+# 1. Клонирование репозитория
+git clone https://github.com/balookrd/yarn-explorer.git
+cd yarn-explorer
+
+# 2. Установка чарта со стандартными настройками
+helm install yarn-explorer ./helm/yarn-explorer --namespace yarn-system --create-namespace
+```
+
+### Пример пользовательского `custom-values.yaml`:
+
+```yaml
+replicaCount: 1
+
+image:
+  repository: ghcr.io/balookrd/yarn-explorer
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  className: "nginx"
+  hosts:
+    - host: yarn-explorer.company.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: yarn-explorer-tls
+      hosts:
+        - yarn-explorer.company.local
+
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClassName: "fast-storage"
+
+kerberos:
+  enabled: true
+  keytab:
+    # Можно передать base64-содержимое keytab-файла:
+    keytabBase64: "BQIAAABUAAI..."
+    # Или использовать предварительно созданный K8s Secret:
+    # existingSecret: "my-custom-keytab-secret"
+    # secretKey: "yarn-explorer.keytab"
+  krb5Conf: |
+    [libdefaults]
+      default_realm = COMPANY.LOCAL
+      dns_lookup_realm = false
+      dns_lookup_kdc = false
+      ticket_lifetime = 24h
+      renew_lifetime = 7d
+      forwardable = true
+    [realms]
+      COMPANY.LOCAL = {
+        kdc = kdc.company.local:88
+        admin_server = kdc.company.local:749
+      }
+
+config:
+  auth:
+    mode: ldap
+    jwt_secret: "prod-ultra-secure-random-jwt-secret-key"
+    token_expiry_hours: 12
+    ldap:
+      server: "ldaps://corp-ad.company.local:636"
+      base_dn: "DC=company,DC=local"
+      bind_dn: "CN=svc-yarn-explorer,OU=ServiceAccounts,DC=company,DC=local"
+      bind_password: "ServiceAccountPassword123"
+      user_search_base: "OU=Users,DC=company,DC=local"
+      group_search_base: "OU=Groups,DC=company,DC=local"
+      role_mapping:
+        admin_groups: ["CN=Hadoop-Admins,OU=Groups,DC=company,DC=local"]
+        writer_groups: ["CN=Hadoop-Operators,OU=Groups,DC=company,DC=local"]
+        reader_groups: ["CN=Hadoop-Analysts,OU=Groups,DC=company,DC=local"]
+  kerberos:
+    service_principal: "yarn-explorer@COMPANY.LOCAL"
+    keytab_path: "/etc/security/keytabs/yarn-explorer.keytab"
+    krb5_conf_path: "/etc/krb5.conf"
+  clusters:
+    - id: "prod-yarn"
+      name: "Production Hadoop"
+      description: "Hadoop 3.3 Production YARN Cluster"
+      rm_hosts:
+        - "rm1.company.local:8088"
+        - "rm2.company.local:8088"
+      kerberos_enabled: true
+      default_partition: "DEFAULT"
+```
+
+Применение параметров:
+```bash
+helm upgrade --install yarn-explorer ./helm/yarn-explorer -f custom-values.yaml -n yarn-system
+```
+
+
+---
+
 ## 🧪 Тестирование
 
 Запуск набора автоматических тестов бэкенда:
@@ -288,9 +402,14 @@ yarn-explorer/
 │   ├── ldap/                    # OpenLDAP конфигурация и пользователи
 │   └── config.yaml              # Конфиг YARN Explorer для демо-стенда
 ├── docker-compose.demo.yml      # Docker Compose демо-стенда
+├── helm/yarn-explorer/          # Production-ready Helm-чарт для развертывания в Kubernetes
+│   ├── Chart.yaml               # Описание и метаданные чарта
+│   ├── values.yaml              # Параметры по умолчанию (resources, ingress, kerberos, db)
+│   └── templates/               # Манифесты K8s (Deployment, Service, Ingress, PVC, ConfigMap, Secret)
 ├── Dockerfile                   # Production Dockerfile YARN Explorer
 ├── start-demo.sh                # Скрипт быстрого запуска стенда
 └── stop-demo.sh                 # Скрипт остановки стенда
+
 ```
 
 ---
