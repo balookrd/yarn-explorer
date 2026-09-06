@@ -17,7 +17,7 @@ from app.services.xml_generator import generate_capacity_scheduler_xml
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/clusters", tags=["queues"])
+router = APIRouter(prefix="/api/v1/clusters", tags=["queues"])
 
 
 def _find_cluster(cluster_id: str) -> ClusterConfig:

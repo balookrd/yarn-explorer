@@ -10,7 +10,7 @@ from app.models.cluster import ClusterSummary
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/clusters", tags=["clusters"])
+router = APIRouter(prefix="/api/v1/clusters", tags=["clusters"])
 
 
 @router.get("", response_model=List[ClusterSummary])

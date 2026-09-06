@@ -535,7 +535,7 @@ def test_four_eyes_change_request_approval(sample_cluster):
 
     # 1. Автор (admin_user) пытается одобрить свой запрос -> 403 Forbidden
     resp = client.post(
-        f"/api/change-requests/{cr_id}/approve",
+        f"/api/v1/change-requests/{cr_id}/approve",
         headers={"Authorization": f"Bearer {token}", "X-Requested-With": "XMLHttpRequest"},
         json={"comment": "Сам создал и сам одобрил"},
     )
@@ -554,7 +554,7 @@ def test_four_eyes_change_request_approval(sample_cluster):
     other_token = create_access_token(data={"user": other_admin.model_dump()}, expires_delta=timedelta(hours=1))
 
     resp_ok = client.post(
-        f"/api/change-requests/{cr_id}/approve",
+        f"/api/v1/change-requests/{cr_id}/approve",
         headers={"Authorization": f"Bearer {other_token}", "X-Requested-With": "XMLHttpRequest"},
         json={"comment": "Одобрено вторым администратором"},
     )

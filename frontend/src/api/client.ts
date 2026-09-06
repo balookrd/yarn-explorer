@@ -3,7 +3,7 @@ import type {
   DraftQueueItem, DiffItem, TokenResponse
 } from '../types';
 
-const API_BASE = '/api';
+const API_BASE = '/api/v1';
 
 // Токен хранится только в оперативной памяти JS для текущей сессии (Zero LocalStorage),
 // предотвращая кражу через XSS. Основная авторизация в браузере опирается на HttpOnly Cookie.

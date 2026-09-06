@@ -20,7 +20,7 @@ from app.api.queues import _find_cluster
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/change-requests", tags=["change-requests"])
+router = APIRouter(prefix="/api/v1/change-requests", tags=["change-requests"])
 
 
 def _flatten_tree(node: QueueNode) -> List[QueueNode]:
