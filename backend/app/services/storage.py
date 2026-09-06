@@ -119,11 +119,18 @@ class StorageService:
 
             self._init_db()
 
-    def _get_connection(self):
-        """Возвращает DBAPI соединение для совместимости."""
-        if self._is_redis:
-            return None
-        return self.engine.raw_connection()
+    def clear_rate_limits(self):
+        """Очищает все записи rate limits (используется для тестов)."""
+        try:
+            if self._is_redis:
+                keys = self.redis_client.keys("yarn:ratelimit:*")
+                if keys:
+                    self.redis_client.delete(*keys)
+                return
+            with self.engine.begin() as conn:
+                conn.execute(delete(self.rate_limits_table))
+        except Exception as e:
+            logger.error(f"Ошибка при очистке rate_limits: {e}")
 
     def _init_db(self):
         if self._is_redis:

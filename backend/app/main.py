@@ -98,7 +98,7 @@ app.include_router(queues_router)
 app.include_router(change_requests_router)
 
 
-@app.get("/health", tags=["system"])
+@app.get("/healthz", tags=["system"])
 async def health_check():
     """Проверка жизнеспособности для Kubernetes liveness/readiness probes."""
     return {"status": "ok"}

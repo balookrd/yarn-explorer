@@ -224,7 +224,7 @@ def test_security_headers_and_cors():
     from app.main import app
 
     client = TestClient(app)
-    response = client.get("/health")
+    response = client.get("/healthz")
     assert response.status_code == 200
     assert response.headers.get("X-Content-Type-Options") == "nosniff"
     assert response.headers.get("X-Frame-Options") == "DENY"
@@ -268,9 +268,7 @@ def test_rate_limiter_blocks_excessive_logins():
 
     client = TestClient(app)
     # Очищаем таблицу перед тестом
-    with storage_service._get_connection() as conn:
-        conn.cursor().execute("DELETE FROM rate_limits")
-        conn.commit()
+    storage_service.clear_rate_limits()
 
     # Делаем 10 запросов (разрешенный лимит)
     for _ in range(10):
@@ -284,9 +282,7 @@ def test_rate_limiter_blocks_excessive_logins():
     assert "Retry-After" in blocked_resp.headers
 
     # Очищаем после теста
-    with storage_service._get_connection() as conn:
-        conn.cursor().execute("DELETE FROM rate_limits")
-        conn.commit()
+    storage_service.clear_rate_limits()
 
 
 def test_mock_auth_bcrypt_hash():
@@ -453,7 +449,7 @@ def test_spnego_kerberos_ldap_enrichment(monkeypatch):
 
     monkeypatch.setattr(auth_module.settings.auth.ldap, "enabled", True)
 
-    resp = client.get("/api/v1/auth/negotiate", headers={"Authorization": "Negotiate YWJjMTIz"})
+    resp = client.get("/api/v1/auth/sso", headers={"Authorization": "Negotiate YWJjMTIz"})
     assert resp.status_code == 200
     user = resp.json()["user"]
     assert user["username"] == "spnego_dev"

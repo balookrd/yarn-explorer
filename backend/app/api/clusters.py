@@ -14,7 +14,6 @@ router = APIRouter(prefix="/api/v1/clusters", tags=["clusters"])
 
 
 @router.get("", response_model=List[ClusterSummary])
-@router.get("/", response_model=List[ClusterSummary])
 async def get_clusters(user: UserSession = Depends(get_current_user)):
     """Возвращает список кластеров, доступных текущему пользователю, с его ролями."""
     result = []

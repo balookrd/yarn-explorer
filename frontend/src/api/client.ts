@@ -75,7 +75,7 @@ export const api = {
   },
 
   async getClusters(): Promise<ClusterSummary[]> {
-    return request<ClusterSummary[]>('/clusters/');
+    return request<ClusterSummary[]>('/clusters');
   },
 
   async getQueueTree(clusterId: string): Promise<QueueTreeResponse> {
