@@ -577,6 +577,7 @@
       {resourceMode}
       clusterResources={activeCluster?.total_resources}
       {selectedPartition}
+      {partitions}
       bind:isOpen={isDrawerOpen}
       onSave={handleSaveDraft}
     />
@@ -587,6 +588,7 @@
       {resourceMode}
       clusterResources={activeCluster?.total_resources}
       {selectedPartition}
+      {partitions}
       onConfirm={handleConfirmAdd}
     />
 

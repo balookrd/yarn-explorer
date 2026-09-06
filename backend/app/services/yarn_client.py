@@ -269,6 +269,18 @@ class YarnClient:
         lifetime_raw = queue_json.get("maxApplicationLifetime") or queue_json.get("maximumApplicationLifetime")
         lifetime = int(lifetime_raw) if lifetime_raw is not None else None
 
+        # Node Labels / Partitioning
+        labels_raw = queue_json.get("nodeLabels") or queue_json.get("accessibleNodeLabels")
+        accessible_labels = None
+        if isinstance(labels_raw, list):
+            accessible_labels = [str(lbl) for lbl in labels_raw]
+        elif isinstance(labels_raw, str) and labels_raw.strip():
+            accessible_labels = [s.strip() for s in labels_raw.split(",") if s.strip()]
+
+        default_label = queue_json.get("defaultNodeLabelExpression")
+        if default_label is not None:
+            default_label = str(default_label).strip()
+
         return QueueNode(
             name=name,
             path=path,
@@ -282,6 +294,8 @@ class YarnClient:
             max_am_resource_percent=max_am,
             max_parallel_apps=max_parallel,
             max_application_lifetime=lifetime,
+            accessible_node_labels=accessible_labels,
+            default_node_label_expression=default_label,
             partitions=partitions,
             current_used_resources=ResourceAllocation(memory_mb=used_mem, vcores=used_cores),
             allocated_resources=ResourceAllocation(memory_mb=used_mem, vcores=used_cores),

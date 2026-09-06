@@ -50,12 +50,25 @@
   - Защита от LDAP-инъекций и обязательная валидация TLS-сертификатов серверов каталога.
   - Защита от XML Comment / Configuration Injection при генерации `capacity-scheduler.xml`.
   - Защита от BOLA / IDOR в API заявок на согласование изменений (Change Requests).
-  - Безопасный CORS с белым списком доменов и HTTP Security Headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`).
+  - Безопасный CORS с белым списком доменов и HTTP Security Headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Content-Security-Policy`).
+  - Структурированный журнал аудита безопасности (Audit Log в формате JSON) для отслеживания всех критических операций (попытки входа, блокировки, создание и согласование заявок).
   - Запуск Docker-контейнера от непривилегированного пользователя (`appuser`, UID 1000).
 
 ---
 
-### 2. Разделение квот на RAM и vCPU
+### 2. Node Labels и партиционирование кластера (Cluster Partitioning)
+- **Управление доступом к меткам узлов (`accessible-node-labels`)**:
+  - Назначение очередей на специализированные пулы нод (GPU, SSD, High-Memory, Compute-Only).
+  - Поддержка выбора конкретных меток через интерактивные теги или символа `*` (доступ ко всем меткам кластера).
+  - Назначение дефолтной метки для приложений очереди (`default-node-label-expression`).
+- **Квоты в разрезе партиций**:
+  - Задание независимых значений `capacity` и `maximum-capacity` для каждого раздела узлов (`accessible-node-labels.<label>.capacity`).
+  - Автоматическая генерация валидных параметров YARN Capacity Scheduler в `capacity-scheduler.xml`.
+  - Отображение бейджей разрешённых меток непосредственно в дереве очередей (`QueueTreeTable`).
+
+---
+
+### 3. Разделение квот на RAM и vCPU
 - **Раздельный учет ресурсов**: раздельное задание гарантированной емкости (Capacity) и максимального лимита (Max Capacity / Burst) для **RAM** (MB, GB, TB) и **vCPU** (Cores).
 - **Переключение режимов отображения**:
   - **Проценты (%)**: классическое распределение долей кластера.

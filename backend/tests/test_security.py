@@ -229,6 +229,8 @@ def test_security_headers_and_cors():
     assert response.headers.get("X-Content-Type-Options") == "nosniff"
     assert response.headers.get("X-Frame-Options") == "DENY"
     assert response.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+    assert "Content-Security-Policy" in response.headers
+    assert "default-src 'self'" in response.headers["Content-Security-Policy"]
 
 
 def test_token_revocation_on_logout():
@@ -329,3 +331,34 @@ def test_env_variable_overrides():
         assert loaded_settings.server.debug is False
         assert "https://yarn.company.com" in loaded_settings.server.cors_origins
         assert "https://yarn-internal.company.com" in loaded_settings.server.cors_origins
+
+
+def test_audit_logging(tmp_path):
+    """Проверяет запись структурированного JSON аудита в логгер и файл."""
+    import json
+    import os
+    from unittest.mock import patch
+    from app.core.audit import audit_log
+
+    audit_file = str(tmp_path / "audit_test.log")
+    with patch.dict(os.environ, {"AUDIT_LOG_FILE": audit_file}):
+        with patch("app.core.audit.AUDIT_LOG_FILE", audit_file):
+            audit_log(
+                action="TEST_ACTION",
+                username="admin_user",
+                client_ip="192.168.1.100",
+                details={"cluster_id": "prod-cluster", "status_code": 200},
+                status="SUCCESS",
+            )
+
+    assert os.path.exists(audit_file)
+    with open(audit_file, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    assert len(lines) == 1
+    event = json.loads(lines[0])
+    assert event["action"] == "TEST_ACTION"
+    assert event["username"] == "admin_user"
+    assert event["client_ip"] == "192.168.1.100"
+    assert event["status"] == "SUCCESS"
+    assert event["details"]["cluster_id"] == "prod-cluster"
+    assert "timestamp" in event

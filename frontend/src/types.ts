@@ -62,6 +62,8 @@ export interface QueueNode {
   max_am_resource_percent?: number;
   max_parallel_apps?: number;
   max_application_lifetime?: number;
+  accessible_node_labels?: string[];
+  default_node_label_expression?: string;
   partitions: Record<string, PartitionResourceConfig>;
   current_used_resources: ResourceAllocation;
   allocated_resources: ResourceAllocation;
@@ -129,6 +131,8 @@ export interface DraftQueueItem {
   max_am_resource_percent?: number;
   max_parallel_apps?: number;
   max_application_lifetime?: number;
+  accessible_node_labels?: string[];
+  default_node_label_expression?: string;
   partitions: Record<string, PartitionResourceConfig>;
 }
 

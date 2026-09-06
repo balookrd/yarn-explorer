@@ -196,6 +196,21 @@
               {#if draftItem?.action === 'delete'}
                 <span class="text-[9px] px-1.5 py-0.2 rounded bg-red-100 text-red-700 border border-red-200 font-bold">DEL</span>
               {/if}
+
+              <!-- Node Labels Badge -->
+              {#if (draftItem?.accessible_node_labels ?? row.node.accessible_node_labels)?.length}
+                {@const effectiveLabels = draftItem?.accessible_node_labels ?? row.node.accessible_node_labels ?? []}
+                <div class="flex items-center gap-1" title="Accessible Node Labels: {effectiveLabels.join(', ')}">
+                  {#each effectiveLabels.slice(0, 2) as lbl}
+                    <span class="text-[9px] px-1 py-0.2 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-mono font-bold">
+                      {lbl}
+                    </span>
+                  {/each}
+                  {#if effectiveLabels.length > 2}
+                    <span class="text-[9px] text-slate-400 font-mono font-bold">+{effectiveLabels.length - 2}</span>
+                  {/if}
+                </div>
+              {/if}
             </div>
           </td>
 

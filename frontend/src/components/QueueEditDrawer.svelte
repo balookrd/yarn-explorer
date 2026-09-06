@@ -9,6 +9,7 @@
     resourceMode,
     clusterResources = { memory_mb: 2097152, vcores: 1024 },
     selectedPartition,
+    partitions = [],
     isOpen = $bindable(),
     onSave,
   }: {
@@ -17,6 +18,7 @@
     resourceMode: string;
     clusterResources?: { memory_mb: number; vcores: number };
     selectedPartition: string;
+    partitions?: string[];
     isOpen: boolean;
     onSave: (draft: DraftQueueItem) => void;
   } = $props();
@@ -50,6 +52,10 @@
   let editMaxAmPercent = $state<number | null>(null);
   let editMaxParallelApps = $state<number | null>(null);
   let editMaxLifetime = $state<number | null>(null);
+
+  // Node Labels
+  let editAccessibleLabels = $state<string[]>([]);
+  let editDefaultLabelExpression = $state<string>('');
 
   const totalMem = $derived(clusterResources?.memory_mb || 2097152);
   const totalCores = $derived(clusterResources?.vcores || 1024);
@@ -105,6 +111,11 @@
     editMaxAmPercent = draft?.max_am_resource_percent ?? queue.max_am_resource_percent ?? null;
     editMaxParallelApps = draft?.max_parallel_apps ?? queue.max_parallel_apps ?? null;
     editMaxLifetime = draft?.max_application_lifetime ?? queue.max_application_lifetime ?? null;
+
+    // Инициализация Node Labels
+    const initialLabels = draft?.accessible_node_labels ?? queue.accessible_node_labels ?? [];
+    editAccessibleLabels = [...initialLabels];
+    editDefaultLabelExpression = draft?.default_node_label_expression ?? queue.default_node_label_expression ?? '';
   }
 
   // Заполняем поля только при открытии Drawer или смене очереди
@@ -299,6 +310,8 @@
       max_am_resource_percent: editMaxAmPercent !== null && !isNaN(editMaxAmPercent) ? editMaxAmPercent : undefined,
       max_parallel_apps: editMaxParallelApps !== null && !isNaN(editMaxParallelApps) ? editMaxParallelApps : undefined,
       max_application_lifetime: editMaxLifetime !== null && !isNaN(editMaxLifetime) ? editMaxLifetime : undefined,
+      accessible_node_labels: editAccessibleLabels.length > 0 ? editAccessibleLabels : undefined,
+      default_node_label_expression: editDefaultLabelExpression ? editDefaultLabelExpression : undefined,
       partitions: updatedPartitions,
     };
 
@@ -345,6 +358,10 @@
       isLinked = Math.abs(cap - vcap) < 0.01;
     }
     editState = queue.state as 'RUNNING' | 'STOPPED';
+
+    const initialLabels = queue.accessible_node_labels ?? [];
+    editAccessibleLabels = [...initialLabels];
+    editDefaultLabelExpression = queue.default_node_label_expression ?? '';
   }
   const origMode = $derived(queue?.resource_mode || resourceMode || 'percentage');
   const isModeChanged = $derived(inputMode !== origMode);
@@ -840,6 +857,83 @@
             />
             <p class="text-[10px] text-slate-400 mt-0.5">Время жизни (-1 = бессрочно, 86400 = 24ч)</p>
           </div>
+        </div>
+      </div>
+
+      <!-- Node Labels / Partitioning -->
+      <div class="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-3">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+          <div class="flex items-center gap-1.5">
+            <Layers class="w-4 h-4 text-emerald-600" />
+            <span class="text-xs font-bold text-slate-800">Node Labels / Разделы кластера</span>
+          </div>
+          <span class="text-[10px] px-1.5 py-0.5 rounded font-mono font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Partitioning</span>
+        </div>
+
+        <!-- Accessible Node Labels -->
+        <div>
+          <span class="block text-xs font-semibold text-slate-700 mb-1.5">
+            Доступные метки узлов (Accessible Labels)
+          </span>
+          {#if partitions.length > 1}
+            <div class="flex flex-wrap gap-1.5">
+              {#each partitions.filter(p => p !== 'DEFAULT') as partName}
+                {@const isChecked = editAccessibleLabels.includes(partName) || editAccessibleLabels.includes('*')}
+                <button
+                  type="button"
+                  onclick={() => {
+                    if (editAccessibleLabels.includes(partName)) {
+                      editAccessibleLabels = editAccessibleLabels.filter(l => l !== partName);
+                    } else {
+                      editAccessibleLabels = [...editAccessibleLabels.filter(l => l !== '*'), partName];
+                    }
+                  }}
+                  class="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono font-medium transition cursor-pointer border {
+                    isChecked
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300 ring-1 ring-emerald-400'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }"
+                >
+                  <span class="w-1.5 h-1.5 rounded-full {isChecked ? 'bg-emerald-500' : 'bg-slate-300'}"></span>
+                  <span>{partName}</span>
+                </button>
+              {/each}
+              <button
+                type="button"
+                onclick={() => {
+                  if (editAccessibleLabels.includes('*')) {
+                    editAccessibleLabels = [];
+                  } else {
+                    editAccessibleLabels = ['*'];
+                  }
+                }}
+                class="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-mono font-bold transition cursor-pointer border {
+                  editAccessibleLabels.includes('*')
+                    ? 'bg-purple-50 text-purple-800 border-purple-300 ring-1 ring-purple-400'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                }"
+              >
+                <span>* (Все метки)</span>
+              </button>
+            </div>
+          {:else}
+            <p class="text-[11px] text-slate-500 italic">В кластере настроен только раздел DEFAULT.</p>
+          {/if}
+        </div>
+
+        <!-- Default Node Label Expression -->
+        <div>
+          <label for="edit-default-node-label" class="block text-[11px] font-semibold text-slate-700 mb-1">
+            Дефолтная метка задач (Default Label Expression)
+          </label>
+          <input
+            id="edit-default-node-label"
+            type="text"
+            placeholder="например: gpu или оставьте пустым"
+            bind:value={editDefaultLabelExpression}
+            class="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-mono text-slate-900 outline-none focus:border-emerald-500"
+          />
+          <p class="text-[10px] text-slate-400 mt-0.5">Метка нод, назначаемая приложениям по умолчанию при отправке в эту очередь</p>
         </div>
       </div>
 

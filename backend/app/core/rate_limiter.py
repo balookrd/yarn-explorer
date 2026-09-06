@@ -39,6 +39,14 @@ class RateLimiter:
         allowed, retry_after = self.is_allowed(key=f"ip:{client_ip}")
 
         if not allowed:
+            from app.core.audit import audit_log
+            audit_log(
+                action="RATE_LIMIT_EXCEEDED",
+                username="anonymous",
+                client_ip=client_ip,
+                details={"path": request.url.path, "retry_after": retry_after},
+                status="WARNING",
+            )
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=f"Слишком много попыток. Пожалуйста, повторите через {retry_after} сек.",

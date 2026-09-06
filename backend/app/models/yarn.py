@@ -54,6 +54,8 @@ class QueueNode(BaseModel):
     max_am_resource_percent: Optional[float] = None
     max_parallel_apps: Optional[int] = None
     max_application_lifetime: Optional[int] = None
+    accessible_node_labels: Optional[List[str]] = None
+    default_node_label_expression: Optional[str] = None
     partitions: Dict[str, PartitionResourceConfig] = Field(default_factory=dict)
     
     # Текущие метрики использования из YARN RM
@@ -127,6 +129,8 @@ class QueueDraftItem(BaseModel):
     max_am_resource_percent: Optional[float] = None
     max_parallel_apps: Optional[int] = None
     max_application_lifetime: Optional[int] = None
+    accessible_node_labels: Optional[List[str]] = None
+    default_node_label_expression: Optional[str] = None
     partitions: Dict[str, PartitionResourceConfig]
 
 

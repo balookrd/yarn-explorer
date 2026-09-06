@@ -9,6 +9,7 @@
     resourceMode,
     clusterResources = { memory_mb: 2097152, vcores: 1024 },
     selectedPartition,
+    partitions = [],
     onConfirm,
   }: {
     parentPath: string;
@@ -16,11 +17,15 @@
     resourceMode: string;
     clusterResources?: { memory_mb: number; vcores: number };
     selectedPartition: string;
+    partitions?: string[];
     onConfirm: (draft: DraftQueueItem) => void;
   } = $props();
 
   let queueName = $state('');
   let inputMode = $state<'percentage' | 'absolute'>('percentage');
+
+  let accessibleNodeLabels = $state<string[]>([]);
+  let defaultLabelExpression = $state<string>('');
 
   let capacity = $state(10);
   let ramGb = $state(0);
@@ -191,12 +196,16 @@
       max_am_resource_percent: maxAmPercent !== null && !isNaN(maxAmPercent) ? maxAmPercent : undefined,
       max_parallel_apps: maxParallelApps !== null && !isNaN(maxParallelApps) ? maxParallelApps : undefined,
       max_application_lifetime: maxLifetime !== null && !isNaN(maxLifetime) ? maxLifetime : undefined,
+      accessible_node_labels: accessibleNodeLabels.length > 0 ? accessibleNodeLabels : undefined,
+      default_node_label_expression: defaultLabelExpression ? defaultLabelExpression : undefined,
       partitions: { [selectedPartition]: part },
     };
 
     onConfirm(draft);
     // Reset
     queueName = '';
+    accessibleNodeLabels = [];
+    defaultLabelExpression = '';
     capacity = 10;
     maxCapacity = 20;
     queueType = 'elastic';
@@ -488,6 +497,68 @@
             </div>
           </div>
         </div>
+
+        <!-- Node Labels / Partitioning -->
+        {#if partitions.length > 1}
+          <div class="bg-emerald-50/40 border border-emerald-100 rounded-xl p-3 space-y-2.5">
+            <div class="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+              <Layers class="w-3.5 h-3.5 text-emerald-600" />
+              <span>Node Labels (Метки узлов)</span>
+            </div>
+
+            <div>
+              <span class="block text-[10px] font-semibold text-slate-600 mb-1">Доступные метки</span>
+              <div class="flex flex-wrap gap-1">
+                {#each partitions.filter(p => p !== 'DEFAULT') as partName}
+                  {@const isChecked = accessibleNodeLabels.includes(partName) || accessibleNodeLabels.includes('*')}
+                  <button
+                    type="button"
+                    onclick={() => {
+                      if (accessibleNodeLabels.includes(partName)) {
+                        accessibleNodeLabels = accessibleNodeLabels.filter(l => l !== partName);
+                      } else {
+                        accessibleNodeLabels = [...accessibleNodeLabels.filter(l => l !== '*'), partName];
+                      }
+                    }}
+                    class="px-2 py-0.5 rounded text-[10px] font-mono font-medium transition cursor-pointer border {
+                      isChecked
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300 font-bold'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }"
+                  >
+                    {partName}
+                  </button>
+                {/each}
+                <button
+                  type="button"
+                  onclick={() => {
+                    accessibleNodeLabels = accessibleNodeLabels.includes('*') ? [] : ['*'];
+                  }}
+                  class="px-2 py-0.5 rounded text-[10px] font-mono font-bold transition cursor-pointer border {
+                    accessibleNodeLabels.includes('*')
+                      ? 'bg-purple-100 text-purple-800 border-purple-300'
+                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                  }"
+                >
+                  * (Все)
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label for="add-default-label" class="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                Дефолтная метка (Default Label Expression)
+              </label>
+              <input
+                id="add-default-label"
+                type="text"
+                placeholder="например: gpu"
+                bind:value={defaultLabelExpression}
+                class="w-full px-2 py-1 rounded border border-slate-300 bg-white text-xs font-mono text-slate-800 outline-none focus:border-emerald-500"
+              />
+            </div>
+          </div>
+        {/if}
       </div>
 
       <div class="flex items-center gap-2 mt-6">

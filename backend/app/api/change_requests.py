@@ -167,6 +167,15 @@ async def create_change_request(
     created = storage_service.get_change_request(cr_id)
     if not created:
         raise HTTPException(status_code=500, detail="Ошибка при создании заявки")
+
+    from app.core.audit import audit_log
+    audit_log(
+        action="CR_CREATED",
+        username=current_user.username,
+        client_ip="internal",
+        details={"cr_id": cr_id, "cluster_id": request.cluster_id, "title": request.title, "changes_count": len(request.changes)},
+        status="SUCCESS",
+    )
     return created
 
 
@@ -262,6 +271,15 @@ async def approve_change_request(
     if not success:
         raise HTTPException(status_code=500, detail="Ошибка при одобрении заявки")
 
+    from app.core.audit import audit_log
+    audit_log(
+        action="CR_APPROVED",
+        username=current_user.username,
+        client_ip="internal",
+        details={"cr_id": cr_id, "cluster_id": cr.cluster_id, "author": cr.author, "comment": review.comment or ""},
+        status="SUCCESS",
+    )
+
     return storage_service.get_change_request(cr_id)
 
 
@@ -293,6 +311,15 @@ async def reject_change_request(
 
     if not success:
         raise HTTPException(status_code=500, detail="Ошибка при отклонении заявки")
+
+    from app.core.audit import audit_log
+    audit_log(
+        action="CR_REJECTED",
+        username=current_user.username,
+        client_ip="internal",
+        details={"cr_id": cr_id, "cluster_id": cr.cluster_id, "author": cr.author, "comment": review.comment or ""},
+        status="SUCCESS",
+    )
 
     return storage_service.get_change_request(cr_id)
 

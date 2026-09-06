@@ -22,6 +22,8 @@ MANAGED_QUEUE_SUFFIXES = {
     "maximum-am-resource-percent",
     "max-parallel-apps",
     "maximum-application-lifetime",
+    "accessible-node-labels",
+    "default-node-label-expression",
 }
 
 GLOBAL_MANAGED_PROPERTIES = {
@@ -144,6 +146,21 @@ def _compute_managed_properties(
         lifetime = getattr(q, "max_application_lifetime", None)
         if lifetime is not None:
             managed_props[f"{prop_prefix}.maximum-application-lifetime"] = str(lifetime)
+
+        # Node Labels / Partitioning
+        labels = getattr(q, "accessible_node_labels", None)
+        if labels is not None:
+            labels_str = ",".join(labels) if isinstance(labels, list) else str(labels)
+            managed_props[f"{prop_prefix}.accessible-node-labels"] = labels_str
+        elif path == "root" and cluster.partitions:
+            # Для root по умолчанию доступны все метки кластера, либо '*'
+            non_default = [p for p in cluster.partitions if p != "DEFAULT" and p != cluster.default_partition]
+            if non_default:
+                managed_props[f"{prop_prefix}.accessible-node-labels"] = "*"
+
+        default_label = getattr(q, "default_node_label_expression", None)
+        if default_label is not None:
+            managed_props[f"{prop_prefix}.default-node-label-expression"] = str(default_label).strip()
 
     return managed_props, deleted_paths, children_by_parent
 

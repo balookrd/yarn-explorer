@@ -350,3 +350,31 @@ class TestXmlGenerator:
         assert "<value>40.0</value>" in xml
         assert "ml" in xml
 
+    def test_xml_generation_node_labels(self):
+        cluster = self._make_cluster()
+        cluster.partitions = ["DEFAULT", "gpu", "ssd"]
+        root_q = _make_queue("root", None, 100.0, 100.0)
+        ml_q = _make_queue("ml", "root", 50.0, 80.0)
+        ml_q.accessible_node_labels = ["gpu", "ssd"]
+        ml_q.default_node_label_expression = "gpu"
+
+        # Добавляем партицию gpu в ml
+        from app.models.yarn import PartitionResourceConfig
+        ml_q.partitions["gpu"] = PartitionResourceConfig(
+            partition_name="gpu",
+            capacity=100.0,
+            max_capacity=100.0,
+            is_elastic=False,
+            elasticity_ratio=1.0,
+        )
+
+        xml = generate_capacity_scheduler_xml([root_q, ml_q], cluster)
+        assert "yarn.scheduler.capacity.root.ml.accessible-node-labels" in xml
+        assert "<value>gpu,ssd</value>" in xml
+        assert "yarn.scheduler.capacity.root.ml.default-node-label-expression" in xml
+        assert "<value>gpu</value>" in xml
+        assert "yarn.scheduler.capacity.root.ml.accessible-node-labels.gpu.capacity" in xml
+        assert "<value>100.0</value>" in xml
+        assert "yarn.scheduler.capacity.root.accessible-node-labels" in xml
+        assert "<value>*</value>" in xml
+

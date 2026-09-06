@@ -62,6 +62,7 @@ def _mock_authenticate(username: str, password: str):
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
+    request: Request,
     body: LoginRequest,
     response: Response,
     _rate_limit=Depends(auth_rate_limiter),
@@ -83,7 +84,16 @@ async def login(
             ldap_user.is_admin = (role == Role.ADMIN)
             user = ldap_user
 
+    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
     if not user:
+        from app.core.audit import audit_log
+        audit_log(
+            action="LOGIN_FAILED",
+            username=body.username,
+            client_ip=client_ip,
+            details={"auth_mode": mode},
+            status="WARNING",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Неверное имя пользователя или пароль",
@@ -92,6 +102,15 @@ async def login(
     token = create_access_token(
         data={"user": user.model_dump()},
         expires_delta=timedelta(minutes=settings.auth.jwt.expire_minutes),
+    )
+
+    from app.core.audit import audit_log
+    audit_log(
+        action="LOGIN_SUCCESS",
+        username=user.username,
+        client_ip=client_ip,
+        details={"auth_method": user.auth_method, "role": user.system_role.value},
+        status="SUCCESS",
     )
 
     # Установка безопасной HttpOnly cookie
