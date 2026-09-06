@@ -1,10 +1,29 @@
 import json
 import logging
 import os
-import sqlite3
+import urllib.parse
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Optional
+from sqlalchemy import (
+    create_engine,
+    MetaData,
+    Table,
+    Column,
+    Integer,
+    String,
+    Text,
+    Float,
+    select,
+    insert,
+    update,
+    delete,
+    func,
+    text,
+)
+from sqlalchemy.pool import StaticPool
 
+from app.core.config import settings
 from app.models.change_requests import ChangeRequestSummary, ChangeRequestResponse
 from app.models.yarn import DraftQueueItem, DiffItem
 
@@ -14,59 +33,103 @@ DEFAULT_DB_PATH = os.environ.get("DB_PATH", "data/yarn_explorer.db")
 
 
 class StorageService:
-    def __init__(self, db_path: str = DEFAULT_DB_PATH):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[str] = None, db_url: Optional[str] = None):
+        if db_url:
+            self.db_url = db_url
+        elif db_path:
+            if db_path == ":memory:":
+                self.db_url = "sqlite:///:memory:"
+            elif "://" in db_path:
+                self.db_url = db_path
+            else:
+                self.db_url = f"sqlite:///{db_path}"
+        else:
+            self.db_url = settings.database.url
+
+        self.db_path = db_path or DEFAULT_DB_PATH
+
+        self._is_sqlite = "sqlite" in self.db_url
+        self._is_memory = ":memory:" in self.db_url
+
+        engine_kwargs = {}
+        if self._is_sqlite:
+            if self._is_memory:
+                engine_kwargs = {
+                    "connect_args": {"check_same_thread": False},
+                    "poolclass": StaticPool,
+                }
+            else:
+                engine_kwargs = {
+                    "connect_args": {"check_same_thread": False, "timeout": 30.0},
+                }
+        else:
+            engine_kwargs = {
+                "pool_pre_ping": True,
+                "pool_size": 10,
+                "max_overflow": 20,
+            }
+
+        self.engine = create_engine(self.db_url, **engine_kwargs)
+        self.metadata = MetaData()
+
+        self.cr_table = Table(
+            "change_requests",
+            self.metadata,
+            Column("id", Integer, primary_key=True, autoincrement=True),
+            Column("cluster_id", String(255), nullable=False, index=True),
+            Column("title", String(500), nullable=False),
+            Column("description", Text, nullable=False, default=""),
+            Column("status", String(50), nullable=False, default="SUBMITTED", index=True),
+            Column("author", String(255), nullable=False),
+            Column("created_at", String(100), nullable=False),
+            Column("updated_at", String(100), nullable=False),
+            Column("reviewer", String(255), nullable=True),
+            Column("review_comment", Text, nullable=True),
+            Column("reviewed_at", String(100), nullable=True),
+            Column("changes_json", Text, nullable=False),
+            Column("diffs_json", Text, nullable=False),
+            Column("xml_content", Text, nullable=True),
+        )
+
+        self.revoked_tokens_table = Table(
+            "revoked_tokens",
+            self.metadata,
+            Column("jti", String(255), primary_key=True),
+            Column("expires_at", String(100), nullable=False, index=True),
+        )
+
+        self.rate_limits_table = Table(
+            "rate_limits",
+            self.metadata,
+            Column("id", Integer, primary_key=True, autoincrement=True),
+            Column("key", String(255), nullable=False, index=True),
+            Column("timestamp", Float, nullable=False, index=True),
+        )
+
         self._init_db()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        db_dir = os.path.dirname(self.db_path)
-        if db_dir and not os.path.exists(db_dir):
-            os.makedirs(db_dir, exist_ok=True)
-        conn = sqlite3.connect(self.db_path, timeout=30.0)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _get_connection(self):
+        """Возвращает DBAPI соединение для совместимости."""
+        return self.engine.raw_connection()
 
     def _init_db(self):
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA journal_mode=WAL;")
-            cursor.execute("PRAGMA busy_timeout=30000;")
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS change_requests (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    cluster_id TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    description TEXT NOT NULL DEFAULT '',
-                    status TEXT NOT NULL DEFAULT 'SUBMITTED',
-                    author TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    reviewer TEXT,
-                    review_comment TEXT,
-                    reviewed_at TEXT,
-                    changes_json TEXT NOT NULL,
-                    diffs_json TEXT NOT NULL,
-                    xml_content TEXT
-                );
-            """)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS revoked_tokens (
-                    jti TEXT PRIMARY KEY,
-                    expires_at TEXT NOT NULL
-                );
-            """)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS rate_limits (
-                    key TEXT NOT NULL,
-                    timestamp REAL NOT NULL
-                );
-            """)
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_cr_cluster ON change_requests(cluster_id);")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_cr_status ON change_requests(status);")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_revoked_exp ON revoked_tokens(expires_at);")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_rate_limits ON rate_limits(key, timestamp);")
-            conn.commit()
-            logger.info(f"SQLite база данных инициализирована: {self.db_path}")
+        try:
+            if self._is_sqlite and not self._is_memory:
+                parsed = urllib.parse.urlparse(self.db_url)
+                file_path = parsed.path
+                if file_path:
+                    db_file = Path(file_path.lstrip("/"))
+                    db_file.parent.mkdir(parents=True, exist_ok=True)
+
+            self.metadata.create_all(self.engine)
+
+            if self._is_sqlite and not self._is_memory:
+                with self.engine.begin() as conn:
+                    conn.execute(text("PRAGMA journal_mode=WAL;"))
+                    conn.execute(text("PRAGMA busy_timeout=30000;"))
+            logger.info(f"База данных инициализирована: {self.db_url}")
+        except Exception as e:
+            logger.error(f"Ошибка при инициализации базы данных ({self.db_url}): {e}")
 
     def create_change_request(
         self,
@@ -81,40 +144,46 @@ class StorageService:
         changes_json = json.dumps([c.model_dump() for c in changes], ensure_ascii=False)
         diffs_json = json.dumps([d.model_dump() for d in diffs], ensure_ascii=False)
 
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                INSERT INTO change_requests (
-                    cluster_id, title, description, status, author,
-                    created_at, updated_at, changes_json, diffs_json
-                ) VALUES (?, ?, ?, 'SUBMITTED', ?, ?, ?, ?, ?)
-                """,
-                (cluster_id, title, description, author, now, now, changes_json, diffs_json),
+        with self.engine.begin() as conn:
+            stmt = insert(self.cr_table).values(
+                cluster_id=cluster_id,
+                title=title,
+                description=description,
+                status="SUBMITTED",
+                author=author,
+                created_at=now,
+                updated_at=now,
+                changes_json=changes_json,
+                diffs_json=diffs_json,
             )
-            conn.commit()
-            return cursor.lastrowid
+            result = conn.execute(stmt)
+            return result.inserted_primary_key[0]
 
     def list_change_requests(
         self,
         cluster_id: Optional[str] = None,
         status: Optional[str] = None,
     ) -> List[ChangeRequestSummary]:
-        query = "SELECT id, cluster_id, title, status, author, created_at, updated_at, reviewer, reviewed_at, changes_json FROM change_requests WHERE 1=1"
-        params = []
+        stmt = select(
+            self.cr_table.c.id,
+            self.cr_table.c.cluster_id,
+            self.cr_table.c.title,
+            self.cr_table.c.status,
+            self.cr_table.c.author,
+            self.cr_table.c.created_at,
+            self.cr_table.c.updated_at,
+            self.cr_table.c.reviewer,
+            self.cr_table.c.reviewed_at,
+            self.cr_table.c.changes_json,
+        )
         if cluster_id:
-            query += " AND cluster_id = ?"
-            params.append(cluster_id)
+            stmt = stmt.where(self.cr_table.c.cluster_id == cluster_id)
         if status:
-            query += " AND status = ?"
-            params.append(status)
-        query += " ORDER BY id DESC"
+            stmt = stmt.where(self.cr_table.c.status == status)
+        stmt = stmt.order_by(self.cr_table.c.id.desc())
 
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-
+        with self.engine.connect() as conn:
+            rows = conn.execute(stmt).mappings().all()
             result = []
             for r in rows:
                 changes = json.loads(r["changes_json"]) if r["changes_json"] else []
@@ -135,10 +204,9 @@ class StorageService:
             return result
 
     def get_change_request(self, cr_id: int) -> Optional[ChangeRequestResponse]:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM change_requests WHERE id = ?", (cr_id,))
-            r = cursor.fetchone()
+        stmt = select(self.cr_table).where(self.cr_table.c.id == cr_id)
+        with self.engine.connect() as conn:
+            r = conn.execute(stmt).mappings().one_or_none()
             if not r:
                 return None
 
@@ -173,18 +241,21 @@ class StorageService:
         xml_content: str,
     ) -> bool:
         now = datetime.now(timezone.utc).isoformat()
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                UPDATE change_requests
-                SET status = 'APPROVED', reviewer = ?, review_comment = ?, reviewed_at = ?, xml_content = ?, updated_at = ?
-                WHERE id = ? AND status = 'SUBMITTED'
-                """,
-                (reviewer, comment, now, xml_content, now, cr_id),
+        stmt = (
+            update(self.cr_table)
+            .where(self.cr_table.c.id == cr_id, self.cr_table.c.status == "SUBMITTED")
+            .values(
+                status="APPROVED",
+                reviewer=reviewer,
+                review_comment=comment,
+                reviewed_at=now,
+                xml_content=xml_content,
+                updated_at=now,
             )
-            conn.commit()
-            return cursor.rowcount > 0
+        )
+        with self.engine.begin() as conn:
+            result = conn.execute(stmt)
+            return result.rowcount > 0
 
     def reject_change_request(
         self,
@@ -193,18 +264,20 @@ class StorageService:
         comment: str,
     ) -> bool:
         now = datetime.now(timezone.utc).isoformat()
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                UPDATE change_requests
-                SET status = 'REJECTED', reviewer = ?, review_comment = ?, reviewed_at = ?, updated_at = ?
-                WHERE id = ? AND status = 'SUBMITTED'
-                """,
-                (reviewer, comment, now, now, cr_id),
+        stmt = (
+            update(self.cr_table)
+            .where(self.cr_table.c.id == cr_id, self.cr_table.c.status == "SUBMITTED")
+            .values(
+                status="REJECTED",
+                reviewer=reviewer,
+                review_comment=comment,
+                reviewed_at=now,
+                updated_at=now,
             )
-            conn.commit()
-            return cursor.rowcount > 0
+        )
+        with self.engine.begin() as conn:
+            result = conn.execute(stmt)
+            return result.rowcount > 0
 
     def cancel_change_request(
         self,
@@ -212,40 +285,49 @@ class StorageService:
         author: str,
     ) -> bool:
         now = datetime.now(timezone.utc).isoformat()
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                UPDATE change_requests
-                SET status = 'CANCELLED', updated_at = ?
-                WHERE id = ? AND status = 'SUBMITTED' AND author = ?
-                """,
-                (now, cr_id, author),
+        stmt = (
+            update(self.cr_table)
+            .where(
+                self.cr_table.c.id == cr_id,
+                self.cr_table.c.status == "SUBMITTED",
+                self.cr_table.c.author == author,
             )
-            conn.commit()
-            return cursor.rowcount > 0
+            .values(
+                status="CANCELLED",
+                updated_at=now,
+            )
+        )
+        with self.engine.begin() as conn:
+            result = conn.execute(stmt)
+            return result.rowcount > 0
 
     def count_pending(self, cluster_id: Optional[str] = None) -> int:
-        query = "SELECT COUNT(*) FROM change_requests WHERE status = 'SUBMITTED'"
-        params = []
+        stmt = select(func.count(self.cr_table.c.id)).where(self.cr_table.c.status == "SUBMITTED")
         if cluster_id:
-            query += " AND cluster_id = ?"
-            params.append(cluster_id)
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            return cursor.fetchone()[0]
+            stmt = stmt.where(self.cr_table.c.cluster_id == cluster_id)
+        with self.engine.connect() as conn:
+            return conn.execute(stmt).scalar() or 0
 
     def revoke_token(self, jti: str, expires_at: str) -> bool:
         """Помещает токен (jti) в список отозванных токенов."""
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "INSERT OR REPLACE INTO revoked_tokens (jti, expires_at) VALUES (?, ?)",
-                    (jti, expires_at),
-                )
-                conn.commit()
+            with self.engine.begin() as conn:
+                existing = conn.execute(
+                    select(self.revoked_tokens_table.c.jti).where(
+                        self.revoked_tokens_table.c.jti == jti
+                    )
+                ).scalar_one_or_none()
+
+                if existing:
+                    conn.execute(
+                        update(self.revoked_tokens_table)
+                        .where(self.revoked_tokens_table.c.jti == jti)
+                        .values(expires_at=expires_at)
+                    )
+                else:
+                    conn.execute(
+                        insert(self.revoked_tokens_table).values(jti=jti, expires_at=expires_at)
+                    )
                 return True
         except Exception as e:
             logger.error(f"Ошибка при отзыве токена {jti}: {e}")
@@ -256,10 +338,12 @@ class StorageService:
         if not jti:
             return False
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT 1 FROM revoked_tokens WHERE jti = ?", (jti,))
-                return cursor.fetchone() is not None
+            with self.engine.connect() as conn:
+                stmt = select(self.revoked_tokens_table.c.jti).where(
+                    self.revoked_tokens_table.c.jti == jti
+                ).limit(1)
+                result = conn.execute(stmt).scalar_one_or_none()
+                return result is not None
         except Exception as e:
             logger.error(f"Ошибка проверки отзыва токена {jti}: {e}")
             return False
@@ -268,10 +352,12 @@ class StorageService:
         """Удаляет из базы устаревшие отозванные токены."""
         now = datetime.now(timezone.utc).isoformat()
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM revoked_tokens WHERE expires_at < ?", (now,))
-                conn.commit()
+            with self.engine.begin() as conn:
+                conn.execute(
+                    delete(self.revoked_tokens_table).where(
+                        self.revoked_tokens_table.c.expires_at < now
+                    )
+                )
         except Exception as e:
             logger.warning(f"Ошибка очистки устаревших отозванных токенов: {e}")
 
@@ -279,23 +365,28 @@ class StorageService:
         self, key: str, max_requests: int, window_seconds: int, now: Optional[float] = None
     ) -> tuple[bool, int]:
         """
-        Проверяет и регистрирует попытку запроса в SQLite (sliding window).
+        Проверяет и регистрирует попытку запроса в БД (sliding window).
         Возвращает (allowed, retry_after_seconds).
         """
         import time
         current_time = now if now is not None else time.time()
         cutoff = current_time - window_seconds
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
+            with self.engine.begin() as conn:
                 # Удаляем устаревшие записи для данного ключа
-                cursor.execute("DELETE FROM rate_limits WHERE key = ? AND timestamp < ?", (key, cutoff))
-                # Получаем все оставшиеся временные метки отсортированными
-                cursor.execute(
-                    "SELECT timestamp FROM rate_limits WHERE key = ? ORDER BY timestamp ASC",
-                    (key,),
+                conn.execute(
+                    delete(self.rate_limits_table).where(
+                        self.rate_limits_table.c.key == key,
+                        self.rate_limits_table.c.timestamp < cutoff,
+                    )
                 )
-                rows = cursor.fetchall()
+                # Получаем временные метки
+                stmt = (
+                    select(self.rate_limits_table.c.timestamp)
+                    .where(self.rate_limits_table.c.key == key)
+                    .order_by(self.rate_limits_table.c.timestamp.asc())
+                )
+                rows = conn.execute(stmt).fetchall()
                 count = len(rows)
 
                 if count >= max_requests:
@@ -303,12 +394,12 @@ class StorageService:
                     retry_after = max(1, int(window_seconds - (current_time - oldest_ts)))
                     return False, retry_after
 
-                cursor.execute("INSERT INTO rate_limits (key, timestamp) VALUES (?, ?)", (key, current_time))
-                conn.commit()
+                conn.execute(
+                    insert(self.rate_limits_table).values(key=key, timestamp=current_time)
+                )
                 return True, 0
         except Exception as e:
             logger.error(f"Ошибка проверки rate limit для {key}: {e}")
-            # Fallback: в случае сбоя БД не блокируем легитимных пользователей
             return True, 0
 
     def cleanup_rate_limits(self, older_than_seconds: int = 3600):
@@ -316,10 +407,12 @@ class StorageService:
         import time
         cutoff = time.time() - older_than_seconds
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM rate_limits WHERE timestamp < ?", (cutoff,))
-                conn.commit()
+            with self.engine.begin() as conn:
+                conn.execute(
+                    delete(self.rate_limits_table).where(
+                        self.rate_limits_table.c.timestamp < cutoff
+                    )
+                )
         except Exception as e:
             logger.warning(f"Ошибка очистки rate limits: {e}")
 

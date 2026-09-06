@@ -105,3 +105,19 @@ def test_storage_crud(temp_storage):
     assert cancelled is True
     cr_cancelled = temp_storage.get_change_request(cr_id_3)
     assert cr_cancelled.status == "CANCELLED"
+
+
+def test_storage_sqlalchemy_url():
+    storage = StorageService(db_url="sqlite:///:memory:")
+    assert storage.is_token_revoked("jti-1") is False
+    assert storage.revoke_token("jti-1", "2099-01-01T00:00:00Z") is True
+    assert storage.is_token_revoked("jti-1") is True
+
+    # Rate limiting
+    allowed, retry = storage.check_and_record_rate_limit("ip:127.0.0.1", max_requests=2, window_seconds=60)
+    assert allowed is True
+    allowed, retry = storage.check_and_record_rate_limit("ip:127.0.0.1", max_requests=2, window_seconds=60)
+    assert allowed is True
+    allowed, retry = storage.check_and_record_rate_limit("ip:127.0.0.1", max_requests=2, window_seconds=60)
+    assert allowed is False
+    assert retry > 0

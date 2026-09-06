@@ -1,5 +1,5 @@
-# Default values for yarn-explorer.
-
+# Количество реплик. Внимание: при использовании локальной SQLite БД поддерживается только 1 реплика (replicaCount: 1).
+# Для запуска 2 и более реплик настройте внешний PostgreSQL (config.database.url: postgresql://...).
 replicaCount: 1
 
 image:
@@ -159,6 +159,12 @@ config:
       - "http://localhost:5173"
       - "http://127.0.0.1:5173"
 
+  database:
+    # URL подключения к базе данных (SQLite / PostgreSQL)
+    # SQLite по умолчанию: "sqlite:///app/data/yarn_explorer.db"
+    # PostgreSQL: "postgresql://user:password@postgres-host:5432/yarn_explorer"
+    url: "sqlite:///app/data/yarn_explorer.db"
+
   auth:
     # Режимы: mock (для тестов), ldaps_only, kerberos_only, hybrid
     mode: "mock"
@@ -269,3 +275,5 @@ networkPolicy:
 secrets:
   jwtSecret: "yarn-explorer-super-secret-key-change-in-production-random-hash"
   ldapBindPassword: "ChangeMeServicePassword"
+  # Пароль базы данных PostgreSQL (опционально)
+  databasePassword: ""

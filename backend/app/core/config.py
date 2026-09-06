@@ -90,8 +90,13 @@ class AclConfig(BaseModel):
     roles: GlobalRoles = Field(default_factory=GlobalRoles)
 
 
+class DatabaseConfig(BaseModel):
+    url: str = "sqlite:///data/yarn_explorer.db"
+
+
 class Settings(BaseSettings):
     server: ServerConfig = Field(default_factory=ServerConfig)
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     acl: AclConfig = Field(default_factory=AclConfig)
     clusters: List[ClusterConfig] = Field(default_factory=list)
@@ -115,6 +120,18 @@ class Settings(BaseSettings):
         inst = cls(**data)
 
         # Переопределение секретов и параметров из переменных окружения
+        env_db_url = os.environ.get("YARN_DATABASE_URL") or os.environ.get("DATABASE_URL")
+        if env_db_url:
+            inst.database.url = env_db_url
+        elif os.environ.get("DB_PATH"):
+            db_p = os.environ.get("DB_PATH")
+            if db_p == ":memory:":
+                inst.database.url = "sqlite:///:memory:"
+            elif "://" in db_p:
+                inst.database.url = db_p
+            else:
+                inst.database.url = f"sqlite:///{db_p}"
+
         env_jwt_secret = os.environ.get("JWT_SECRET_KEY")
         if env_jwt_secret:
             inst.auth.jwt.secret_key = env_jwt_secret
