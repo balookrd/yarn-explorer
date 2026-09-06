@@ -184,8 +184,10 @@ config:
       enabled: false
       server_uri: "ldaps://ad.company.local:636"
       use_ssl: true
+      verify_cert: true
+      allow_insecure_ssl: false
       bind_dn: "cn=svc_yarn_explorer,ou=services,dc=company,dc=local"
-      bind_password: "ChangeMeServicePassword"
+      bind_password: ""
       user_base_dn: "ou=users,dc=company,dc=local"
       user_filter: "(&(objectClass=user)(sAMAccountName={username}))"
       user_display_name_attr: "displayName"
@@ -201,7 +203,7 @@ config:
       service_principal: "HTTP/yarn-explorer.company.local@COMPANY.LOCAL"
 
     jwt:
-      secret_key: "change-this-jwt-secret-in-production-random-hash"
+      secret_key: ""
       algorithm: "HS256"
       expire_minutes: 480
 
@@ -262,3 +264,8 @@ networkPolicy:
     allowKerberos: true
     allowLdap: true
     allowYarn: true
+
+# Чувствительные секреты приложения (монтируются через k8s Secret)
+secrets:
+  jwtSecret: "yarn-explorer-super-secret-key-change-in-production-random-hash"
+  ldapBindPassword: "ChangeMeServicePassword"

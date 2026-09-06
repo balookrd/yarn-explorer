@@ -51,6 +51,16 @@ spec:
               value: "{{ .Values.persistence.mountPath }}/yarn_explorer.db"
             - name: PYTHONUNBUFFERED
               value: "1"
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "yarn-explorer.fullname" . }}-secrets
+                  key: jwt-secret
+            - name: LDAP_BIND_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "yarn-explorer.fullname" . }}-secrets
+                  key: ldap-password
             {{- if .Values.kerberos.enabled }}
             - name: KRB5_CONFIG
               value: "/etc/krb5.conf"
@@ -105,7 +115,7 @@ spec:
             name: {{ include "yarn-explorer.fullname" . }}-krb5
         - name: keytab-volume
           secret:
-            secretName: {{ include "yarn-explorer.keytabSecretName" . }}
+            secretName: {{ if .Values.kerberos.keytab.existingSecret }}{{ .Values.kerberos.keytab.existingSecret }}{{ else }}{{ include "yarn-explorer.fullname" . }}-secrets{{ end }}
             defaultMode: 0400
         {{- end }}
       {{- with .Values.nodeSelector }}

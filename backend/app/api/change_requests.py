@@ -210,6 +210,13 @@ async def approve_change_request(
     cluster = _find_cluster(cr.cluster_id)
     check_cluster_permission(current_user, cluster, Role.ADMIN)
 
+    # Принцип Four-Eyes (разделение обязанностей): автор заявки не может самостоятельно одобрить свой запрос
+    if cr.author == current_user.username:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Принцип разделения обязанностей (Four-Eyes): автор заявки не может самостоятельно одобрить свой запрос",
+        )
+
     if cr.status != "SUBMITTED":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

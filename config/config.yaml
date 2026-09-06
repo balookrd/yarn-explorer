@@ -43,6 +43,8 @@ auth:
     group_filter: "(&(objectClass=group)(member={user_dn}))"
     group_name_attr: "cn"
     ca_cert_file: null
+    verify_cert: true
+    allow_insecure_ssl: false
 
   kerberos:
     enabled: true

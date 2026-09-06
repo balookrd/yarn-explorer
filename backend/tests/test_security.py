@@ -362,3 +362,222 @@ def test_audit_logging(tmp_path):
     assert event["status"] == "SUCCESS"
     assert event["details"]["cluster_id"] == "prod-cluster"
     assert "timestamp" in event
+
+
+def test_csrf_cookie_protection():
+    """Проверяет CSRF защиту и отсутствие fail-open при cookie-аутентификации."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+
+    login_resp = client.post("/api/auth/login", json={"username": "admin_user", "password": "password123"})
+    assert login_resp.status_code == 200
+    token = login_resp.json()["access_token"]
+
+    # 1. Запрос с cookie без Origin/Referer/X-Requested-With (fail-open check) -> 403
+    resp_failopen = client.post("/api/auth/logout", cookies={"access_token": token})
+    assert resp_failopen.status_code == 403
+
+    # 2. Запрос с поддельным Origin -> 403
+    resp_evil = client.post(
+        "/api/auth/logout",
+        cookies={"access_token": token},
+        headers={"Origin": "http://evil-attacker.com"}
+    )
+    assert resp_evil.status_code == 403
+
+    # 3. Легитимный запрос с X-Requested-With -> 200
+    resp_ok = client.post(
+        "/api/auth/logout",
+        cookies={"access_token": token},
+        headers={"X-Requested-With": "XMLHttpRequest"}
+    )
+    assert resp_ok.status_code == 200
+
+
+def test_ip_spoofing_rate_limiting():
+    """Проверяет защиту от подделки IP (X-Forwarded-For) в rate limiter."""
+    from app.core.rate_limiter import get_client_ip
+    from starlette.datastructures import Headers
+
+    class DummyClient:
+        def __init__(self, host: str):
+            self.host = host
+
+    class DummyRequest:
+        def __init__(self, client_host: str, headers: dict):
+            self.client = DummyClient(client_host)
+            self.headers = Headers(headers)
+
+    # 1. Запрос от внешнего адреса со спуфингом
+    req_untrusted = DummyRequest("198.51.100.99", {"x-forwarded-for": "1.1.1.1"})
+    assert get_client_ip(req_untrusted) == "198.51.100.99"
+
+    # 2. Запрос от доверенного прокси (127.0.0.1)
+    req_trusted = DummyRequest("127.0.0.1", {"x-forwarded-for": "203.0.113.50, 127.0.0.1"})
+    assert get_client_ip(req_trusted) == "203.0.113.50"
+
+
+def test_spnego_kerberos_ldap_enrichment(monkeypatch):
+    """Проверяет обогащение групп пользователя через LDAP при Kerberos SPNEGO SSO в yarn-explorer."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    import app.api.auth as auth_module
+    from app.models.auth import UserSession, Role
+
+    client = TestClient(app)
+
+    # Мокаем Kerberos authenticate_spnego
+    monkeypatch.setattr(auth_module.kerberos_manager, "authenticate_spnego", lambda header: UserSession(
+        username="spnego_dev",
+        display_name="spnego_dev",
+        groups=[],
+        auth_method="kerberos",
+        is_admin=False,
+        system_role=Role.READER
+    ))
+
+    # Мокаем get_user_info в ldap_service
+    monkeypatch.setattr(auth_module.ldap_service, "get_user_info", lambda uname: UserSession(
+        username=uname,
+        display_name="SPNEGO Developer",
+        email="spnego_dev@yarn.corp",
+        groups=["hadoop-admins"],
+        auth_method="ldap",
+        is_admin=True,
+        system_role=Role.ADMIN
+    ))
+
+    monkeypatch.setattr(auth_module.settings.auth.ldap, "enabled", True)
+
+    resp = client.get("/api/auth/negotiate", headers={"Authorization": "Negotiate YWJjMTIz"})
+    assert resp.status_code == 200
+    user = resp.json()["user"]
+    assert user["username"] == "spnego_dev"
+    assert "hadoop-admins" in user["groups"]
+    assert user["system_role"] == "admin"
+    assert user["is_admin"] is True
+
+
+def test_no_query_param_token_support():
+    """Проверяет, что токен в query params не принимается."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+    login_resp = client.post("/api/auth/login", json={"username": "admin_user", "password": "password123"})
+    token = login_resp.json()["access_token"]
+
+    # Очищаем cookies клиента
+    client.cookies.clear()
+
+    resp = client.get(f"/api/auth/me?token={token}")
+    assert resp.status_code == 401
+
+
+def test_mock_users_strict_isolation_yarn(monkeypatch):
+    """Проверяет строгую изоляцию mock-пользователей: вход разрешен ТОЛЬКО в режиме mode='mock'."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.core.config import settings
+    import app.api.auth as auth_mod
+
+    monkeypatch.setattr(auth_mod.ldap_service, "authenticate", lambda u, p: None)
+    client = TestClient(app)
+
+    # 1. При mode == 'mock' вход успешен
+    monkeypatch.setattr(settings.auth, "mode", "mock")
+    resp_mock = client.post("/api/auth/login", json={"username": "admin_user", "password": "password123"})
+    assert resp_mock.status_code == 200
+
+    # 2. При mode == 'hybrid' mock-пользователи запрещены -> 401
+    monkeypatch.setattr(settings.auth, "mode", "hybrid")
+    resp_hybrid = client.post("/api/auth/login", json={"username": "admin_user", "password": "password123"})
+    assert resp_hybrid.status_code == 401
+
+    # 3. При mode == 'ldaps_only' mock-пользователи запрещены -> 401
+    monkeypatch.setattr(settings.auth, "mode", "ldaps_only")
+    resp_ldap = client.post("/api/auth/login", json={"username": "admin_user", "password": "password123"})
+    assert resp_ldap.status_code == 401
+
+
+def test_four_eyes_change_request_approval(sample_cluster):
+    """Проверяет принцип Four-Eyes: автор Change Request не может сам одобрить свою заявку."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.services.storage import storage_service
+    from app.core.security import create_access_token
+    from datetime import timedelta
+
+    # Создаем заявку от имени admin_user для кластера prod-yarn
+    cr_id = storage_service.create_change_request(
+        cluster_id="prod-yarn",
+        title="Тест Four-Eyes",
+        description="Попытка самоодобрения",
+        author="admin_user",
+        changes=[],
+        diffs=[],
+    )
+
+    client = TestClient(app)
+    admin_session = UserSession(
+        username="admin_user",
+        display_name="Admin",
+        groups=["hadoop-admins"],
+        auth_method="mock",
+        is_admin=True,
+        system_role=Role.ADMIN,
+    )
+    token = create_access_token(data={"user": admin_session.model_dump()}, expires_delta=timedelta(hours=1))
+
+    # 1. Автор (admin_user) пытается одобрить свой запрос -> 403 Forbidden
+    resp = client.post(
+        f"/api/change-requests/{cr_id}/approve",
+        headers={"Authorization": f"Bearer {token}", "X-Requested-With": "XMLHttpRequest"},
+        json={"comment": "Сам создал и сам одобрил"},
+    )
+    assert resp.status_code == 403
+    assert "Four-Eyes" in resp.json()["detail"]
+
+    # 2. Другой администратор (other_admin) одобряет запрос -> 200 OK
+    other_admin = UserSession(
+        username="other_admin",
+        display_name="Other Admin",
+        groups=["hadoop-admins"],
+        auth_method="mock",
+        is_admin=True,
+        system_role=Role.ADMIN,
+    )
+    other_token = create_access_token(data={"user": other_admin.model_dump()}, expires_delta=timedelta(hours=1))
+
+    resp_ok = client.post(
+        f"/api/change-requests/{cr_id}/approve",
+        headers={"Authorization": f"Bearer {other_token}", "X-Requested-With": "XMLHttpRequest"},
+        json={"comment": "Одобрено вторым администратором"},
+    )
+    assert resp_ok.status_code == 200
+    assert resp_ok.json()["status"] == "APPROVED"
+    assert resp_ok.json()["reviewer"] == "other_admin"
+
+
+def test_yarn_client_session_thread_safety():
+    """Проверяет создание потокобезопасной сессии для HTTP/Kerberos запросов."""
+    from app.services.yarn_client import _create_kerberos_session
+    import requests
+
+    s1 = _create_kerberos_session()
+    s2 = _create_kerberos_session()
+    assert isinstance(s1, requests.Session)
+    assert isinstance(s2, requests.Session)
+    assert s1 is not s2  # Сессии изолированы друг от друга
+    s1.close()
+    s2.close()
+
+
+def test_tls_verification_defaults_yarn():
+    """Проверяет, что проверка TLS сертификатов включена по умолчанию."""
+    from app.core.config import settings
+    assert settings.auth.ldap.verify_cert is True
+
+

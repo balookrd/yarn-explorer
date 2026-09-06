@@ -10,7 +10,7 @@ from app.core.security import create_access_token, get_current_user, security_sc
 from app.core.ldap_auth import ldap_service
 from app.core.kerberos import kerberos_manager
 from app.core.acl import _check_match
-from app.core.rate_limiter import auth_rate_limiter
+from app.core.rate_limiter import auth_rate_limiter, get_client_ip
 from app.models.auth import LoginRequest, UserSession, TokenResponse, Role
 
 logger = logging.getLogger(__name__)
@@ -71,12 +71,11 @@ async def login(
     user = None
     mode = settings.auth.mode
 
-    # Mock auth
-    if mode in ("mock", "hybrid"):
+    # Mock auth разрешен ТОЛЬКО в строгом режиме mode == "mock"
+    if mode == "mock":
         user = _mock_authenticate(body.username, body.password)
-
-    # LDAP auth
-    if not user and mode in ("ldaps_only", "hybrid"):
+    elif mode in ("ldaps_only", "hybrid") and settings.auth.ldap.enabled:
+        # В режимах ldaps_only и hybrid mock-пользователи строго запрещены
         ldap_user = ldap_service.authenticate(body.username, body.password)
         if ldap_user:
             role = _resolve_global_role(ldap_user.username, ldap_user.groups)
@@ -84,7 +83,7 @@ async def login(
             ldap_user.is_admin = (role == Role.ADMIN)
             user = ldap_user
 
-    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
+    client_ip = get_client_ip(request)
     if not user:
         from app.core.audit import audit_log
         audit_log(
@@ -151,9 +150,27 @@ async def spnego_login(
             detail="Ошибка SPNEGO-аутентификации",
         )
 
+    # Если включен LDAP, обогащаем профиль и список групп пользователя из каталога
+    if settings.auth.ldap.enabled:
+        ldap_user = ldap_service.get_user_info(user.username)
+        if ldap_user:
+            user.groups = ldap_user.groups
+            user.display_name = ldap_user.display_name
+            user.email = ldap_user.email
+
     role = _resolve_global_role(user.username, user.groups)
     user.system_role = role
     user.is_admin = (role == Role.ADMIN)
+
+    client_ip = get_client_ip(request)
+    from app.core.audit import audit_log
+    audit_log(
+        action="SPNEGO_LOGIN_SUCCESS",
+        username=user.username,
+        client_ip=client_ip,
+        details={"auth_method": "kerberos", "role": user.system_role.value, "groups": user.groups},
+        status="SUCCESS",
+    )
 
     token = create_access_token(
         data={"user": user.model_dump()},
@@ -187,17 +204,22 @@ async def logout(
 ):
     """Выход: отзыв токена на стороне сервера (blacklist) и удаление cookie."""
     token = None
+    is_cookie_auth = False
     if credentials:
         token = credentials.credentials
     elif "access_token" in request.cookies:
         token = request.cookies.get("access_token")
+        is_cookie_auth = True
+
+    if is_cookie_auth:
+        from app.core.security import verify_csrf
+        verify_csrf(request, is_cookie_auth)
 
     if token:
-        from app.core.security import decode_access_token
         from app.services.storage import storage_service
         # Декодируем токен без проверки на отзыв, чтобы извлечь jti для отзыва
         try:
-            from jose import jwt
+            import jwt
             payload = jwt.decode(
                 token,
                 settings.auth.jwt.secret_key,
@@ -207,7 +229,10 @@ async def logout(
             jti = payload.get("jti")
             if jti:
                 exp = payload.get("exp")
-                exp_iso = datetime.fromtimestamp(exp, timezone.utc).isoformat() if exp else datetime.now(timezone.utc).isoformat()
+                if isinstance(exp, (int, float)):
+                    exp_iso = datetime.fromtimestamp(exp, timezone.utc).isoformat()
+                else:
+                    exp_iso = datetime.now(timezone.utc).isoformat()
                 storage_service.revoke_token(jti, exp_iso)
         except Exception as e:
             logger.debug(f"Ошибка при отзыве токена во время logout: {e}")

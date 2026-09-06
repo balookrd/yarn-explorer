@@ -11,42 +11,75 @@ from app.models.auth import UserSession, Role
 security_scheme = HTTPBearer(auto_error=False)
 
 
+from urllib.parse import urlparse
+
+def _is_allowed_origin(url_str: str, request: Request, allowed_cors: list[str]) -> bool:
+    if not url_str:
+        return False
+    try:
+        parsed = urlparse(url_str)
+        if not parsed.scheme or not parsed.netloc:
+            return False
+        if parsed.scheme.lower() not in ("http", "https"):
+            return False
+
+        target_origin = f"{parsed.scheme.lower()}://{parsed.netloc.lower()}".rstrip("/")
+        target_netloc = parsed.netloc.lower()
+
+        for allowed in allowed_cors:
+            if allowed == "*":
+                return True
+            p_allowed = urlparse(allowed)
+            if p_allowed.netloc:
+                if f"{p_allowed.scheme.lower()}://{p_allowed.netloc.lower()}".rstrip("/") == target_origin:
+                    return True
+            elif allowed.rstrip("/").lower() == target_origin:
+                return True
+
+        req_host = request.headers.get("host", "").lower()
+        if req_host and target_netloc == req_host:
+            return True
+
+        base_netloc = request.base_url.netloc.lower()
+        if base_netloc and target_netloc == base_netloc:
+            return True
+
+        base_url_str = str(request.base_url).rstrip("/").lower()
+        if target_origin == base_url_str:
+            return True
+
+        return False
+    except Exception:
+        return False
+
+
 def verify_csrf(request: Request, is_cookie_auth: bool):
     """
     Защита от Cross-Site Request Forgery (CWE-352).
     Если запрос аутентифицирован через Cookie и изменяет состояние (POST, PUT, DELETE, PATCH),
-    требуется подтверждение легитимности источника (Sec-Fetch-Site, Origin, X-Requested-With).
+    требуется подтверждение легитимности источника (Sec-Fetch-Site, Origin, Referer, X-Requested-With).
     """
     if not is_cookie_auth:
         return
 
     if request.method in ("POST", "PUT", "DELETE", "PATCH"):
         sec_fetch_site = request.headers.get("Sec-Fetch-Site")
-        if sec_fetch_site in ("cross-site",):
+        if sec_fetch_site and sec_fetch_site.lower() == "cross-site":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="CSRF protection: межсайтовый запрос отклонен (Sec-Fetch-Site: cross-site)"
             )
 
-        origin = request.headers.get("Origin")
-        referer = request.headers.get("Referer")
         x_requested_with = request.headers.get("X-Requested-With")
-
         if x_requested_with == "XMLHttpRequest":
             return
 
-        if origin:
-            allowed = set(settings.server.cors_origins)
-            host = request.headers.get("Host", "")
-            if origin in allowed or any(origin.endswith(f"://{host}") or f"://{host}" in origin for _ in [1]):
-                return
+        origin = request.headers.get("Origin")
+        if origin and _is_allowed_origin(origin, request, settings.server.cors_origins):
+            return
 
-        if referer:
-            host = request.headers.get("Host", "")
-            if f"://{host}/" in referer or referer.endswith(f"://{host}"):
-                return
-
-        if not (origin or referer or x_requested_with):
+        referer = request.headers.get("Referer")
+        if referer and _is_allowed_origin(referer, request, settings.server.cors_origins):
             return
 
         raise HTTPException(

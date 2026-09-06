@@ -24,8 +24,12 @@ class LdapService:
         try:
             tls_configuration = None
             if self.config.use_ssl:
+                validate_mode = ssl.CERT_REQUIRED
+                if not self.config.verify_cert or self.config.allow_insecure_ssl:
+                    logger.warning("ВНИМАНИЕ: Проверка сертификата LDAPS отключена")
+                    validate_mode = ssl.CERT_NONE
                 tls_configuration = Tls(
-                    validate=ssl.CERT_REQUIRED,
+                    validate=validate_mode,
                     ca_certs_file=self.config.ca_cert_file if self.config.ca_cert_file else None
                 )
 
@@ -129,6 +133,85 @@ class LdapService:
             logger.warning(f"LDAP ошибка получения групп: {e}")
 
         return list(set(groups))
+
+    def get_user_info(self, username: str) -> Optional[UserSession]:
+        """
+        Извлекает информацию о пользователе и его группы без необходимости проверки пароля.
+        Используется для обогащения групп при Kerberos SPNEGO SSO.
+        """
+        if not self.config.enabled:
+            return None
+
+        try:
+            tls_configuration = None
+            if self.config.use_ssl:
+                validate_mode = ssl.CERT_REQUIRED
+                if not self.config.verify_cert or self.config.allow_insecure_ssl:
+                    logger.warning("ВНИМАНИЕ: Проверка сертификата LDAPS отключена")
+                    validate_mode = ssl.CERT_NONE
+                tls_configuration = Tls(
+                    validate=validate_mode,
+                    ca_certs_file=self.config.ca_cert_file if self.config.ca_cert_file else None
+                )
+
+            server = Server(
+                self.config.server_uri,
+                use_ssl=self.config.use_ssl,
+                tls=tls_configuration,
+                get_info=ALL,
+                connect_timeout=5
+            )
+
+            bind_dn = self.config.bind_dn or None
+            bind_password = self.config.bind_password or None
+
+            with Connection(server, user=bind_dn, password=bind_password, auto_bind=True) as conn:
+                safe_username = escape_filter_chars(username)
+                search_filter = self.config.user_filter.format(username=safe_username)
+                conn.search(
+                    search_base=self.config.user_base_dn,
+                    search_filter=search_filter,
+                    search_scope=SUBTREE,
+                    attributes=[
+                        self.config.user_display_name_attr,
+                        self.config.user_email_attr,
+                        "distinguishedName",
+                        "memberOf"
+                    ]
+                )
+
+                if not conn.entries:
+                    logger.warning(f"LDAP: Пользователь {username} не найден")
+                    return None
+
+                user_entry = conn.entries[0]
+                user_dn = user_entry.entry_dn
+
+                display_name = (
+                    str(getattr(user_entry, self.config.user_display_name_attr, username))
+                    if hasattr(user_entry, self.config.user_display_name_attr)
+                    else username
+                )
+                email = (
+                    str(getattr(user_entry, self.config.user_email_attr, ""))
+                    if hasattr(user_entry, self.config.user_email_attr)
+                    else None
+                )
+
+                groups = self._extract_groups(conn, user_dn, user_entry)
+
+                return UserSession(
+                    username=username,
+                    display_name=display_name or username,
+                    email=email,
+                    groups=groups,
+                    auth_method="ldap",
+                    is_admin=False,
+                    system_role=Role.READER
+                )
+        except Exception as e:
+            logger.error(f"LDAP ошибка получения информации о пользователе {username}: {e}")
+            return None
 
 
 ldap_service = LdapService()

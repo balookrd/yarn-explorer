@@ -45,6 +45,8 @@ class LdapConfig(BaseModel):
     group_filter: str = "(&(objectClass=group)(member={user_dn}))"
     group_name_attr: str = "cn"
     ca_cert_file: Optional[str] = None
+    verify_cert: bool = True
+    allow_insecure_ssl: bool = False
 
 
 class KerberosConfig(BaseModel):

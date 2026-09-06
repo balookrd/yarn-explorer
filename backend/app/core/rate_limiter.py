@@ -1,8 +1,43 @@
 import time
+import ipaddress
 from typing import Optional
 from fastapi import Request, HTTPException, status
 
 from app.services.storage import storage_service
+
+TRUSTED_PROXIES = {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
+def is_trusted_proxy(host: str) -> bool:
+    if host in TRUSTED_PROXIES:
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_loopback
+    except ValueError:
+        return False
+
+
+def get_client_ip(request: Request) -> str:
+    """
+    Безопасное определение IP-адреса клиента с защитой от IP Spoofing (CWE-348 / CWE-290).
+    X-Forwarded-For считывается только если непосредственный request.client.host является доверенным прокси.
+    """
+    if not request.client or not request.client.host:
+        return "unknown"
+
+    direct_ip = request.client.host
+    if is_trusted_proxy(direct_ip):
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            ips = [ip.strip() for ip in forwarded_for.split(",") if ip.strip()]
+            if ips:
+                return ips[0]
+        real_ip = request.headers.get("X-Real-IP")
+        if real_ip:
+            return real_ip.strip()
+
+    return direct_ip
 
 
 class RateLimiter:
@@ -18,12 +53,7 @@ class RateLimiter:
         self.window_seconds = window_seconds
 
     def _get_client_ip(self, request: Request) -> str:
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            return forwarded_for.split(",")[0].strip()
-        elif request.client:
-            return request.client.host
-        return "unknown"
+        return get_client_ip(request)
 
     def is_allowed(self, key: str, now: Optional[float] = None) -> tuple[bool, int]:
         """Проверяет лимит и записывает попытку. Возвращает (is_allowed, retry_after)."""

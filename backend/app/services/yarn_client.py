@@ -18,17 +18,14 @@ import requests
 from requests_kerberos import HTTPKerberosAuth, OPTIONAL
 from app.core.kerberos import kerberos_manager
 
-_kerberos_session: Optional[requests.Session] = None
-
-def _get_kerberos_session() -> requests.Session:
-    global _kerberos_session
-    if _kerberos_session is None:
-        _kerberos_session = requests.Session()
-        _kerberos_session.auth = HTTPKerberosAuth(
-            mutual_authentication=OPTIONAL,
-            sanitize_mutual_error_response=False
-        )
-    return _kerberos_session
+def _create_kerberos_session() -> requests.Session:
+    """Создает изолированную потокобезопасную сессию requests для Kerberos/SPNEGO."""
+    session = requests.Session()
+    session.auth = HTTPKerberosAuth(
+        mutual_authentication=OPTIONAL,
+        sanitize_mutual_error_response=False
+    )
+    return session
 
 
 class YarnClient:
@@ -42,20 +39,20 @@ class YarnClient:
         self._active_rm_url: Optional[str] = None
 
     def _execute_kerberos_get(self, url: str, params: dict) -> dict:
-        """Синхронный GET запрос с SPNEGO аутентификацией и сессионными cookies."""
+        """Синхронный GET запрос с SPNEGO аутентификацией и потокобезопасной сессией."""
         kerberos_manager.ensure_service_ticket()
-        session = _get_kerberos_session()
-        resp = session.get(url, params=params, timeout=15.0)
-        resp.raise_for_status()
-        return resp.json()
+        with _create_kerberos_session() as session:
+            resp = session.get(url, params=params, timeout=15.0)
+            resp.raise_for_status()
+            return resp.json()
 
     def _execute_kerberos_get_text(self, url: str, params: dict, headers: Optional[dict] = None) -> str:
         """Синхронный GET запрос с SPNEGO аутентификацией, возвращающий текстовый ответ."""
         kerberos_manager.ensure_service_ticket()
-        session = _get_kerberos_session()
-        resp = session.get(url, params=params, headers=headers, timeout=15.0)
-        resp.raise_for_status()
-        return resp.text
+        with _create_kerberos_session() as session:
+            resp = session.get(url, params=params, headers=headers, timeout=15.0)
+            resp.raise_for_status()
+            return resp.text
 
     async def _http_get(self, url: str, params: Optional[dict] = None) -> dict:
         """Выполняет GET запрос (с Kerberos или без в зависимости от конфигурации)."""
