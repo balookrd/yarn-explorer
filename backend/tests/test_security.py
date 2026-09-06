@@ -320,14 +320,16 @@ def test_env_variable_overrides():
     import os
 
     with patch.dict(os.environ, {
-        "JWT_SECRET_KEY": "env-custom-jwt-secret-xyz",
+        "JWT_SECRET_KEY": "env-custom-jwt-secret-xyz-long-enough-32-chars",
         "LDAP_BIND_PASSWORD": "env-ldap-custom-password",
+        "AUTH_MODE": "ldap",
         "SERVER_DEBUG": "false",
         "CORS_ORIGINS": "https://yarn.company.com,https://yarn-internal.company.com",
     }):
-        loaded_settings = Settings.load_from_yaml("nonexistent-path.yaml")
-        assert loaded_settings.auth.jwt.secret_key == "env-custom-jwt-secret-xyz"
+        loaded_settings = Settings.load_from_yaml("config/config.yaml")
+        assert loaded_settings.auth.jwt.secret_key == "env-custom-jwt-secret-xyz-long-enough-32-chars"
         assert loaded_settings.auth.ldap.bind_password == "env-ldap-custom-password"
+        assert loaded_settings.auth.mode == "ldap"
         assert loaded_settings.server.debug is False
         assert "https://yarn.company.com" in loaded_settings.server.cors_origins
         assert "https://yarn-internal.company.com" in loaded_settings.server.cors_origins
@@ -610,5 +612,79 @@ def test_xxe_entity_expansion_protection():
             queues=[],
             cluster=cluster,
         )
+
+
+def test_validate_production_security():
+    """Проверяет отклонение небезопасных настроек (mock-режим, слабые JWT ключи) при debug=False."""
+    from app.core.config import Settings, ServerConfig, AuthConfig, JwtConfig, LdapConfig
+    import pytest
+
+    # 1. Запрет mock-режима при debug=False
+    insecure_settings = Settings(
+        server=ServerConfig(debug=False),
+        auth=AuthConfig(mode="mock", jwt=JwtConfig(secret_key="a" * 32))
+    )
+    with pytest.raises(ValueError, match="Mock authentication cannot be used in production mode"):
+        insecure_settings.validate_production_security()
+
+    # 2. Запрет дефолтных и коротких ключей JWT при debug=False
+    insecure_key_settings = Settings(
+        server=ServerConfig(debug=False),
+        auth=AuthConfig(mode="ldap", jwt=JwtConfig(secret_key="default-secret-key-change-it"), ldap=LdapConfig(enabled=True))
+    )
+    with pytest.raises(ValueError, match="JWT_SECRET_KEY must be set to a secure unique string"):
+        insecure_key_settings.validate_production_security()
+
+    # 3. Валидная конфигурация при debug=False
+    valid_settings = Settings(
+        server=ServerConfig(debug=False),
+        auth=AuthConfig(mode="ldap", jwt=JwtConfig(secret_key="a-secure-production-random-secret-key-32chars!"), ldap=LdapConfig(enabled=True))
+    )
+    assert valid_settings.validate_production_security() is not None
+
+
+def test_trusted_cidr_proxy_yarn():
+    """Проверяет определение клиентского IP через TRUSTED_CIDRS (подсеть прокси)."""
+    import os
+    from unittest.mock import patch
+    from starlette.datastructures import Headers
+    from app.core.rate_limiter import get_client_ip
+
+    class DummyClient:
+        def __init__(self, host: str):
+            self.host = host
+
+    class DummyRequest:
+        def __init__(self, client_host: str, headers_dict: dict):
+            self.client = DummyClient(client_host)
+            self.headers = Headers(headers_dict)
+
+    with patch.dict(os.environ, {"TRUSTED_CIDRS": "10.42.0.0/16,172.16.0.0/12"}):
+        # Прокси из подсети 10.42.5.10 -> доверяем XFF
+        req1 = DummyRequest("10.42.5.10", {"x-forwarded-for": "198.51.100.7, 10.42.5.10"})
+        assert get_client_ip(req1) == "198.51.100.7"
+
+        # Недоверенный прокси 192.168.1.50 -> игнорируем XFF
+        req2 = DummyRequest("192.168.1.50", {"x-forwarded-for": "198.51.100.7"})
+        assert get_client_ip(req2) == "192.168.1.50"
+
+
+def test_yarn_granular_rate_limiting_per_user():
+    """Проверяет гранулярное ограничение попыток входа по ключу ip:username."""
+    from app.core.rate_limiter import RateLimiter
+
+    limiter = RateLimiter(max_requests=2, window_seconds=60)
+    # 2 неудачные попытки для user1 с IP 192.0.2.1
+    allowed1, _ = limiter.is_allowed("192.0.2.1:user1")
+    assert allowed1 is True
+    allowed2, _ = limiter.is_allowed("192.0.2.1:user1")
+    assert allowed2 is True
+    allowed3, _ = limiter.is_allowed("192.0.2.1:user1")
+    assert allowed3 is False
+
+    # Для другого пользователя user2 с того же IP лимит не исчерпан (защита от DoS NAT)
+    allowed_user2, _ = limiter.is_allowed("192.0.2.1:user2")
+    assert allowed_user2 is True
+
 
 

@@ -65,9 +65,11 @@ async def login(
     request: Request,
     body: LoginRequest,
     response: Response,
-    _rate_limit=Depends(auth_rate_limiter),
 ):
     """Эндпоинт авторизации: поддержка mock, LDAP, hybrid с rate limiting и HttpOnly cookie."""
+    client_ip = get_client_ip(request)
+    auth_rate_limiter.check_limit(f"{client_ip}:{body.username}", request)
+
     user = None
     mode = settings.auth.mode
 
@@ -132,7 +134,6 @@ async def login(
 async def spnego_login(
     request: Request,
     response: Response,
-    _rate_limit=Depends(auth_rate_limiter),
 ):
     """Kerberos SPNEGO SSO авторизация с rate limiting и HttpOnly cookie."""
     auth_header = request.headers.get("Authorization", "")

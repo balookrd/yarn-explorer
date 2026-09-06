@@ -1,7 +1,7 @@
 import os
 import yaml
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings
 
 from app.models.cluster import ClusterConfig
@@ -101,6 +101,24 @@ class Settings(BaseSettings):
     acl: AclConfig = Field(default_factory=AclConfig)
     clusters: List[ClusterConfig] = Field(default_factory=list)
 
+    def validate_production_security(self) -> "Settings":
+        if not self.server.debug:
+            if self.auth.mode == "mock":
+                raise ValueError(
+                    "Mock authentication cannot be used in production mode (debug=False). "
+                    "Please configure LDAP or Kerberos SPNEGO authentication or set server.debug=True for local development."
+                )
+            insecure_defaults = (
+                "default-secret-key-change-it",
+                "yarn-explorer-super-secret-key-change-in-production-random-hash",
+                "change-this-in-production-secret-key-32-chars-long"
+            )
+            if self.auth.jwt.secret_key in insecure_defaults or len(self.auth.jwt.secret_key) < 32:
+                raise ValueError(
+                    "JWT_SECRET_KEY must be set to a secure unique string (at least 32 characters) in production mode."
+                )
+        return self
+
     @classmethod
     def load_from_yaml(cls, config_path: Optional[str] = None) -> "Settings":
         if not config_path:
@@ -120,6 +138,9 @@ class Settings(BaseSettings):
         inst = cls(**data)
 
         # Переопределение секретов и параметров из переменных окружения
+        env_auth_mode = os.environ.get("AUTH_MODE") or os.environ.get("YARN_AUTH_MODE")
+        if env_auth_mode:
+            inst.auth.mode = env_auth_mode
         env_db_url = os.environ.get("YARN_DATABASE_URL") or os.environ.get("DATABASE_URL")
         if env_db_url:
             inst.database.url = env_db_url
@@ -140,7 +161,7 @@ class Settings(BaseSettings):
         if env_ldap_password:
             inst.auth.ldap.bind_password = env_ldap_password
 
-        env_debug = os.environ.get("SERVER_DEBUG")
+        env_debug = os.environ.get("SERVER_DEBUG") or os.environ.get("DEBUG")
         if env_debug is not None:
             inst.server.debug = env_debug.lower() in ("1", "true", "yes")
 
@@ -154,7 +175,7 @@ class Settings(BaseSettings):
                 "ВНИМАНИЕ БЕЗОПАСНОСТИ: Используется стандартный секретный ключ JWT. "
                 "Обязательно замените settings.auth.jwt.secret_key в продакшн-окружении или через переменную JWT_SECRET_KEY!"
             )
-        return inst
+        return inst.validate_production_security()
 
 
 settings = Settings.load_from_yaml()
