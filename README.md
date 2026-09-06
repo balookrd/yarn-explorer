@@ -1,210 +1,123 @@
 # YARN Queue Explorer
 
-**YARN Queue Explorer** — веб-приложение для мониторинга, интерактивной визуализации, моделирования и генерации конфигураций иерархии очередей **Apache Hadoop YARN Capacity Scheduler** в защищенных корпоративных мультикластерных средах.
+**YARN Queue Explorer** — современный корпоративный веб-интерфейс для интерактивного мониторинга, моделирования, валидации баланса и генерации конфигураций иерархии очередей **Apache Hadoop YARN Capacity Scheduler**. Поддерживает мультикластерность, аутентификацию через **LDAPS** и **Kerberos SPNEGO SSO**, разграничение прав доступа (**ADMIN, WRITER, READER**), безопасную песочницу черновиков (Draft Sandbox & Diff), согласование заявок (Change Requests) и развертывание в **Kubernetes (Helm)**.
 
 ---
 
 ## 📑 Содержание
 
+- [Специализированная документация](#-специализированная-документация)
 - [Ключевые возможности](#-ключевые-возможности)
 - [Архитектура решения](#-архитектура-решения)
 - [Быстрый старт: Демо-стенд в Docker](#-быстрый-старт-демонстрационный-стенд-в-docker)
-- [Тестовые учетные записи LDAP](#-тестовые-учетные-записи-ldap)
+- [Тестовые учетные записи (LDAP)](#-тестовые-учетные-записи-ldap)
 - [Локальная разработка](#-локальная-разработка)
 - [Конфигурация (`config.yaml`)](#️-конфигурация-configyaml)
 - [Развертывание в Kubernetes (Helm)](#️-развертывание-в-kubernetes-helm)
 - [Тестирование](#-тестирование)
 - [Структура проекта](#-структура-проекта)
-- [Специализированная документация](#-дополнительная-документация)
+- [Лицензия](#-лицензия)
 
 ---
 
-## 📚 Дополнительная документация
+## 📚 Специализированная документация
 
 | Документ | Содержание |
 |---|---|
-| 🎪 **[DEMO.md](DEMO.md)** | Подробное руководство по керберизированному демонстрационному стенду и 6 пошаговых сценариев работы |
-| ☸️ **[helm/yarn-explorer/README.md](helm/yarn-explorer/README.md)** | Описание параметров `values.yaml` и инструкция по Helm-деплою в Kubernetes |
-| ⚙️ **[backend/README.md](backend/README.md)** | Спецификация REST API, архитектура бэкенда (FastAPI), модели и запуск тестов |
-| 🎨 **[frontend/README.md](frontend/README.md)** | Описание архитектуры клиентской части на Svelte 5 (Runes), компонентов и сборки |
+| 🎪 **[DEMO.md](DEMO.md)** | Подробное руководство по керберизированному демо-стенду (2 кластера YARN RM, OpenLDAP, MIT KDC) и 6 пошаговых сценариев работы |
+| ☸️ **[helm/yarn-explorer/README.md](helm/yarn-explorer/README.md)** | Описание параметров `values.yaml`, сетевых политик, Ingress и инструкция по Helm-деплою в Kubernetes |
+| ⚙️ **[backend/README.md](backend/README.md)** | Спецификация REST API, архитектура FastAPI, алгоритмы балансировки очередей, хранилище SQLite и запуск тестов |
+| 🎨 **[frontend/README.md](frontend/README.md)** | Архитектура интерфейса на Svelte 5 (Runes), компоненты очередей, песочница черновиков и сборка |
 
 ---
 
 ## 🚀 Ключевые возможности
 
-### 1. Мультикластерность и безопасность
-
-- **Поддержка множества кластеров**: единая точка управления для Production, Analytics, ML и других YARN-кластеров с переключением в реальном времени.
+### 1. Мультикластерность и корпоративная безопасность
+- **Единая точка управления**: одновременная работа с множеством независимых кластеров YARN (Production, Analytics, ML) с переключением в реальном времени.
 - **Kerberos & SPNEGO**: аутентификация запросов к YARN ResourceManager REST API через защищенный Kerberos SPNEGO (с поддержкой keytab и `krb5.conf`).
 - **Корпоративный RBAC & LDAP**:
-  - Аутентификация пользователей через корпоративный каталог OpenLDAP / Active Directory, SPNEGO SSO или локальный/mock список пользователей.
+  - Интеграция с каталогами OpenLDAP / Active Directory или Kerberos SSO.
   - Двухуровневый контроль доступа (глобальные политики `ui_access` и ролевые политики для каждого кластера):
     - **ADMIN** — просмотр, добавление/удаление очередей, редактирование, балансировка, согласование заявок, генерация `capacity-scheduler.xml`.
     - **WRITER** — просмотр, редактирование параметров очередей, моделирование изменений, подача заявок на согласование и просмотр diff.
     - **READER** — безопасный режим только для чтения топологии и метрик утилизации очередей.
 - **Эшелонированная защита (OWASP Top 10)**:
-  - Серверная инвалидация JWT при выходе (Blacklist отзыв токенов по `jti`).
-  - Ограничение частоты запросов (Rate Limiting) на эндпоинтах авторизации от перебора паролей и DoS.
-  - Безопасные сессии через `HttpOnly`, `SameSite=Lax` cookies.
-  - Поддержка безопасного хранения хэшей паролей (Bcrypt).
-  - Защита от LDAP-инъекций и обязательная валидация TLS-сертификатов серверов каталога.
-  - Защита от XML Comment / Configuration Injection при генерации `capacity-scheduler.xml`.
-  - Защита от BOLA / IDOR в API заявок на согласование изменений (Change Requests).
-  - Безопасный CORS с белым списком доменов и HTTP Security Headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Content-Security-Policy`).
-  - Структурированный журнал аудита безопасности (Audit Log в формате JSON) для отслеживания всех критических операций (попытки входа, блокировки, создание и согласование заявок).
+  - Сессионные токены передаются исключительно через защищенные `HttpOnly`, `SameSite=Lax` Cookie (полный отказ от `localStorage` для защиты от XSS).
+  - Автоматическая защита от CSRF (`verify_csrf`) по заголовкам `Sec-Fetch-Site`, `Origin`, `Referer` и `X-Requested-With: XMLHttpRequest`.
+  - Скользящий лимитер запросов (Rate Limiting) на эндпоинте входа для защиты от подбора паролей с заголовком `Retry-After`.
+  - Персистентный отзыв токенов при выходе (Logout Blacklist).
+  - Автоматические HTTP Security Headers (`Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`).
+  - Защита от XML Comment / Configuration Injection при генерации `capacity-scheduler.xml` и защита от BOLA / IDOR в API заявок.
+  - Структурированный аудит безопасности (JSON) всех операций входа и изменений очередей для интеграции с SIEM/SOC.
   - Запуск Docker-контейнера от непривилегированного пользователя (`appuser`, UID 10001).
 
----
-
-### 2. Node Labels и партиционирование кластера (Cluster Partitioning)
-- **Управление доступом к меткам узлов (`accessible-node-labels`)**:
+### 2. Управление ресурсами очередей и Node Labels
+- **Node Labels и партиционирование кластера**:
   - Назначение очередей на специализированные пулы нод (GPU, SSD, High-Memory, Compute-Only).
-  - Поддержка выбора конкретных меток через интерактивные теги или символа `*` (доступ ко всем меткам кластера).
-  - Назначение дефолтной метки для приложений очереди (`default-node-label-expression`).
-- **Квоты в разрезе партиций**:
-  - Задание независимых значений `capacity` и `maximum-capacity` для каждого раздела узлов (`accessible-node-labels.<label>.capacity`).
-  - Автоматическая генерация валидных параметров YARN Capacity Scheduler в `capacity-scheduler.xml`.
-  - Отображение бейджей разрешённых меток непосредственно в дереве очередей (`QueueTreeTable`).
+  - Индивидуальные квоты `capacity` и `maximum-capacity` в разрезе партиций узлов.
+- **Раздельный учет ресурсов RAM и vCPU**:
+  - Раздельное или связанное (`RAM = vCPU`) распределение емкости (Capacity) и максимального лимита (Max Capacity / Burst).
+  - Двусторонний автопересчет процентов (%) и физических величин (GB / CPU Cores).
+
+### 3. Интерактивное моделирование и валидация
+- **Песочница черновиков (Draft Sandbox & Diff)**: безопасное моделирование изменений квот и топологии в изолированном черновике без влияния на боевой кластер.
+- **Панель сравнения (Diff Panel)**: визуализация всех изменений перед применением в формате Unified Diff.
+- **Автоматический балансировщик (Capacity Balancer)**: контроль инварианта суммы долей дочерних очередей (ровно 100%) с предупреждениями о недораспределении или превышении квот.
+- **Точечная генерация XML**: сохранение существующих XML-комментариев и нестандартных свойств при формировании готового `capacity-scheduler.xml`.
 
 ---
 
-### 3. Разделение квот на RAM и vCPU
-- **Раздельный учет ресурсов**: раздельное задание гарантированной емкости (Capacity) и максимального лимита (Max Capacity / Burst) для **RAM** (MB, GB, TB) и **vCPU** (Cores).
-- **Переключение режимов отображения**:
-  - **Проценты (%)**: классическое распределение долей кластера.
-  - **Абсолютные величины (GB / CPU)**: физический объем оперативной памяти и ядер процессора.
-- **Двусторонний автопересчет**:
-  - Ввод в гигабайтах автоматически пересчитывает проценты от суммарной емкости кластера.
-  - Ввод в процентах автоматически вычисляет доступный объем памяти и ядер.
-- **Связывание ресурсов**:
-  - Режим **«Связаны (RAM = vCPU)»**: синхронное пропорциональное выделение памяти и вычислительных ядер.
-  - Режим **«Раздельно»**: независимая настройка памяти и ядер для memory-bound или compute-heavy очередей.
+## 🏗 Архитектура решения
 
----
+```mermaid
+flowchart TD
+    Browser["Веб-браузер пользователя"]
+    Frontend["Frontend UI (Svelte 5 + TS SPA)"]
+    Backend["Backend Service (FastAPI + SQLite)"]
+    LDAP["OpenLDAP / Active Directory (LDAPS :636)"]
+    KDC["Kerberos KDC (Keytab & SPNEGO :88)"]
+    RM1["YARN RM 1: Production (REST + SPNEGO :8088)"]
+    RM2["YARN RM 2: Analytics & ML (REST + SPNEGO :8089)"]
+    DB[("База данных (SQLite PVC /app/data)")]
 
-### 3. Интерактивное моделирование (Draft Sandbox & Diff)
-- **Безопасная песочница**: все изменения квот, добавление новых и удаление существующих очередей производятся в изолированном клиентском черновике (draft) без риска повредить боевую конфигурацию.
-- **Визуализация изменений на лету**: подсветка измененных очередей в дереве с отображением исходных и новых значений, а также дельты изменения.
-- **Панель сравнения (Diff Panel)**: структурированное отображение всех изменений в формате Unified Diff перед подтверждением и генерацией XML.
-
----
-
-### 4. Валидация баланса веток (Capacity Balancer)
-- Автоматический контроль инварианта Capacity Scheduler: сумма емкостей дочерних очередей на каждом уровне иерархии должна составлять ровно 100% (или соответствовать емкости родителя).
-- Раздельная валидация баланса для **RAM** и **vCPU**.
-- Предупреждения о недораспределении (underallocated) и перераспределении (overallocated) ресурсов с точностью до десятых долей.
-
----
-
-### 5. Экспорт и генерация `capacity-scheduler.xml`
-- **Точечная модификация существующего файла конфигурации**:
-  - Приложение получает текущий `capacity-scheduler.xml` из YARN ResourceManager (через REST API `/ws/v1/cluster/scheduler-conf` или локальный файл конфигурации кластера).
-  - **Гарантированное сохранение всех необрабатываемых параметров**: такие параметры, как `yarn.scheduler.capacity.resource-calculator`, `schedule-asynchronously.enable`, `node-locality-delay`, права доступа ACL (`acl_submit_applications`, `acl_administer_queue`), приоритеты, а также пользовательские комментарии внутри XML, остаются нетронутыми.
-  - Изменяются, добавляются и удаляются исключительно те параметры, которыми управляет YARN Queue Explorer.
-- **Поддержка форматов ресурсов**:
-  - Процентный формат: `yarn.scheduler.capacity.<queue>.capacity = 60.0`
-  - Абсолютный формат YARN 3.x: `yarn.scheduler.capacity.<queue>.capacity = [memory=1258291,vcores=614]`
-- Встроенные пошаговые инструкции по применению конфигурации на кластере с помощью `yarn rmadmin -refreshQueues`.
-
----
-
-### 6. Расширенные параметры и лимиты приложений очередей
-- **Политика планирования внутри очереди (`ordering-policy`)**:
-  - `FIFO` — классическая очередь в порядке поступления приложений.
-  - `FAIR` — справедливое разделение ресурсов между активными приложениями очереди.
-- **Коэффициент лимита пользователя (`user-limit-factor`)**:
-  - Плавная настройка коэффициента от `0.1` до `10.0` (значения $\le 1.0$ ограничивают пользователя частью гарантированной емкости очереди; значения $> 1.0$ позволяют пользователю утилизировать свободные burst-ресурсы кластера).
-- **Лимиты приложений (Application Limits)**:
-  - **`maximum-applications`**: лимит суммарного числа приложений в очереди (активных и ожидающих запуска).
-  - **`maximum-am-resource-percent`**: максимальная доля ресурсов очереди, выделяемая под Application Masters (в процентах).
-  - **`max-parallel-apps`**: лимит одновременно запущенных (running) приложений в очереди.
-  - **`maximum-application-lifetime`**: максимальное время жизни приложения в секундах (`-1` — бессрочно).
-- **Визуализация и управление**:
-  - Интерактивный блок настроек в карточке редактирования очереди (`QueueEditDrawer`) и окне создания очереди (`AddQueueModal`).
-  - Отображение дельт изменений лимитов в панели сравнения (`DiffPanel`).
-  - Компактный столбец **Policy** в таблице с кликабельным бейджем политики и лимита (`FAIR · 0.2x` / `FIFO · 1.0x`), открывающий панель быстрой настройки.
-
----
-
-### 7. Управление сопоставлением пользователей и очередей (Queue Mappings)
-- **Конструктор правил `yarn.scheduler.capacity.queue-mappings`**:
-  - Назначение очередей для пользователей (`u:`) и групп (`g:`).
-  - Поддержка динамических макроподстановок: `%user` (по имени пользователя) и `%group` (по имени первичной группы).
-  - Выбор целевой очереди из выпадающего дерева очередей кластера.
-  - Управление приоритетом правил с помощью перемещения вверх/вниз (Move Up / Down).
-  - Режим **Raw-текста** для быстрого копирования и редактирования строки маппингов через запятую.
-- **Флаг принудительного переопределения (`queue-mappings-override.enable`)**:
-  - Переключатель разрешения переопределения очереди, запрошенной приложением.
-- **Моделирование и Diff**:
-  - Сохранение правил в черновик, сравнение Live vs Draft конфигурации в Diff Panel и автоматический экспорт в `capacity-scheduler.xml`.
-
----
-
-### 8. Процесс согласования изменений (Change Requests / Approval Workflow)
-- **Серверное хранение заявок (SQLite)**: операторы (роль **WRITER**) могут отправлять смоделированные изменения на согласование с указанием обоснования. Заявки персистентно сохраняются на сервере.
-- **Входящие заявки у администратора**: бейдж в шапке с количеством ожидающих рассмотрения заявок (`SUBMITTED`).
-- **Интерактивный центр согласования**:
-  - Просмотр списка заявок с фильтрами («Все», «Ожидают», «Одобрены», «Отклонены»).
-  - Детальный Side-by-side Diff изменений по каждой очереди (Capacity, Max Capacity, RAM MB, vCPU Cores).
-  - Возможность загрузить предложенные изменения в интерактивный редактор очереди.
-  - Одобрение (**Approve**) с автоматической генерацией `capacity-scheduler.xml` или отклонение (**Reject**) с указанием причины.
-
----
-
-## 🏛 Архитектура решения
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Frontend (Svelte 5 + Vite)                   │
-│  - QueueTreeTable (Дерево очередей, RAM/vCPU, утилизация)      │
-│  - QueueEditDrawer (Редактирование, автопересчет, связка)       │
-│  - AddQueueModal / DiffPanel / XmlExportModal                   │
-└────────────────────────────────┬────────────────────────────────┘
-                                 │ HTTP REST API (Bearer JWT)
-┌────────────────────────────────▼────────────────────────────────┐
-│                    Backend (FastAPI + Python 3.12)              │
-│  - /api/auth       (LDAP / Local JWT аутентификация)            │
-│  - /api/clusters   (Список кластеров, переключение)             │
-│  - /api/queues     (Дерево очередей, парсинг, балансировка)     │
-│  - /api/xml        (Генерация capacity-scheduler.xml)           │
-└───────┬────────────────────────┬────────────────────────┬───────┘
-        │                        │                        │
-        │ Kerberos SPNEGO        │ Kerberos SPNEGO        │ LDAP Search
-┌───────▼──────────────┐ ┌───────▼──────────────┐ ┌───────▼──────────────┐
-│ YARN RM Cluster 1    │ │ YARN RM Cluster 2    │ │ OpenLDAP / AD        │
-│ (Production Hadoop)  │ │ (Analytics & ML)     │ │ (Пользователи/Группы)│
-└──────────────────────┘ └──────────────────────┘ └──────────────────────┘
+    Browser -->|HTTPS / WSS| Frontend
+    Frontend -->|REST API + Secure Cookie| Backend
+    Backend -->|1. Проверка логина и групп| LDAP
+    Backend -->|2. SPNEGO / kinit сервисный тикет| KDC
+    Backend -->|3. Kerberos SPNEGO REST API| RM1
+    Backend -->|3. Kerberos SPNEGO REST API| RM2
+    Backend -->|Заявки Change Requests и токены| DB
 ```
 
 ---
 
 ## 🐳 Быстрый старт: Демонстрационный стенд в Docker
 
-В репозиторий включен полностью автономный керберизированный демо-стенд, разворачиваемый одной командой.
+В репозиторий включен полностью автономный керберизированный демо-стенд, содержащий 2 кластера Hadoop YARN RM (3.3.6), OpenLDAP и MIT Kerberos KDC.
 
 ### Состав стенда:
-| Контейнер | Назначение | Адрес / Порт |
+| Контейнер | Назначение | Адрес на хосте |
 |---|---|---|
-| **`yarn-demo-explorer`** | Сервис YARN Explorer (Backend + UI) | **[http://localhost:8003](http://localhost:8003)** |
-| **`yarn-demo-rm-1`** | YARN RM 1 («Production Hadoop Cluster») | [http://localhost:8088](http://localhost:8088) |
-| **`yarn-demo-rm-2`** | YARN RM 2 («Analytics & ML Cluster») | [http://localhost:8089](http://localhost:8089) |
+| **`yarn-demo-explorer`** | Портал YARN Queue Explorer (Backend + UI) | **[http://localhost:8003](http://localhost:8003)** |
+| **`yarn-demo-rm-1`** | Hadoop YARN RM 1 («Production Hadoop») | [http://localhost:8088](http://localhost:8088) |
+| **`yarn-demo-rm-2`** | Hadoop YARN RM 2 («Analytics & ML») | [http://localhost:8089](http://localhost:8089) |
 | **`yarn-demo-ldap`** | Сервер каталогов OpenLDAP | `localhost:389` |
-| **`yarn-demo-kdc`** | Kerberos KDC (`COMPANY.LOCAL`) | `localhost:88` |
+| **`yarn-demo-kdc`** | MIT Kerberos KDC (`COMPANY.LOCAL`) | `localhost:88` |
 
-### Запуск:
+### Запуск одной командой:
 ```bash
 ./demo/start-demo.sh
 ```
-*(или из папки `demo/`: `cd demo && docker compose up -d`)*
+*(или `docker compose -f demo/docker-compose.yml up -d --build`)*
 
-Подробное руководство со сценариями демонстрации и архитектурой стенда доступно в документе **[DEMO.md](DEMO.md)**.
+После запуска веб-интерфейс доступен по адресу: 👉 **[http://localhost:8003](http://localhost:8003)**.  
+Подробное руководство со сценариями тестирования доступно в **[DEMO.md](DEMO.md)**.
 
-### Остановка:
+### Остановка стенда:
 ```bash
 ./demo/stop-demo.sh
 ```
-*(или `cd demo && docker compose down -v`)*
-
 
 ---
 
@@ -213,8 +126,8 @@
 | Логин | Пароль | Роль | Группа LDAP | Доступные действия |
 |---|---|---|---|---|
 | **`admin_user`** | `password123` | **ADMIN** | `hadoop-admins` | Полный доступ: редактирование, добавление, балансировка, генерация XML |
-| **`writer_user`** | `password123` | **WRITER** | `yarn-operators` | Просмотр, редактирование параметров, просмотр diff |
-| **`reader_user`** | `password123` | **READER** | `bi-analysts` | Только просмотр состояния и очередей |
+| **`writer_user`** | `password123` | **WRITER** | `yarn-operators` | Просмотр, редактирование параметров, моделирование diff |
+| **`reader_user`** | `password123` | **READER** | `bi-analysts` | Только просмотр состояния топологии и метрик очередей |
 
 ---
 
@@ -223,7 +136,7 @@
 ### Требования:
 - Python 3.11+
 - Node.js 20+ и npm
-- Библиотеки Kerberos (`krb5-devel` в Linux или Xcode Command Line Tools в macOS)
+- Системные библиотеки Kerberos (`libkrb5-dev` в Debian/Ubuntu или Xcode CLI tools в macOS)
 
 ### 1. Запуск Backend:
 ```bash
@@ -232,8 +145,8 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# Запуск сервера разработки
-export CONFIG_PATH=../demo/config.yaml
+# Запуск dev-сервера с автоматической перезагрузкой
+export CONFIG_PATH=../config/config.yaml
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
@@ -243,32 +156,29 @@ cd frontend
 npm install
 npm run dev
 ```
-Фронтенд будет доступен по адресу: `http://localhost:5173` (с автоматическим проксированием API-запросов на бэкенд `localhost:8000`).
+Фронтенд запустится на `http://localhost:5173` и будет автоматически проксировать `/api` на бэкенд `localhost:8000`.
 
-### 3. Сборка Frontend в production:
+### 3. Production сборка единого контейнера:
 ```bash
-cd frontend
-npm run build
+docker build -t yarn-explorer:latest .
+docker run -d -p 8000:8000 -v $(pwd)/config:/app/config yarn-explorer:latest
 ```
-Статические файлы компилируются в директорию `frontend/dist` и автоматически раздаются FastAPI бэкендом в production-режиме.
 
 ---
 
 ## ⚙️ Конфигурация (`config.yaml`)
 
-Сервис настраивается через YAML-файл (путь задается переменной окружения `CONFIG_PATH`):
+Конфигурация задается через YAML-файл (путь передается через переменную `CONFIG_PATH`):
 
 ```yaml
 server:
   host: "0.0.0.0"
   port: 8000
   debug: false
-  cors_origins:
-    - "http://localhost:8000"
-    - "http://localhost:5173"
+  cors_origins: ["http://localhost:8000", "http://localhost:5173"]
 
 auth:
-  mode: "hybrid"          # mock | ldaps_only | kerberos_only | hybrid
+  mode: "hybrid" # hybrid, ldaps_only, kerberos_only, mock
   jwt:
     secret_key: "CHANGE-ME-IN-PRODUCTION-RANDOM-SECRET"
     algorithm: "HS256"
@@ -278,179 +188,57 @@ auth:
     server_uri: "ldaps://ad.company.local:636"
     use_ssl: true
     bind_dn: "cn=svc_yarn_explorer,ou=services,dc=company,dc=local"
-    bind_password: "ServicePasswordHere"
+    bind_password: "ServicePassword"
     user_base_dn: "ou=users,dc=company,dc=local"
-    user_filter: "(&(objectClass=user)(sAMAccountName={username}))"
+    group_base_dn: "ou=groups,dc=company,dc=local"
   kerberos:
     enabled: true
-    keytab_file: "/etc/security/keytabs/yarn-explorer.keytab"
+    keytab_path: "/etc/security/keytabs/yarn-explorer.keytab"
     service_principal: "HTTP/yarn-explorer.company.local@COMPANY.LOCAL"
 
-acl:
-  ui_access:
-    allowed_users: ["*"]
-    allowed_groups: ["*"]
-  roles:
-    admin:
-      groups: ["hadoop-admins", "platform-admins"]
-    writer:
-      groups: ["yarn-operators", "data-engineers"]
-    reader:
-      groups: ["*"]
-
 clusters:
-  - id: "prod-yarn"
-    name: "Production Hadoop Cluster"
-    description: "Основной производственный YARN кластер"
-    resource_manager_urls:
-      - "http://rm1.prod.company.local:8088"
-      - "http://rm2.prod.company.local:8088"
-    kerberos_enabled: true
-    kerberos_principal: "yarn/rm1.prod.company.local@COMPANY.LOCAL"
-    impersonation_enabled: true
-    default_partition: "DEFAULT"
-    partitions: ["DEFAULT", "GPU"]
-    resource_mode: "percentage"
-    total_resources:
-      memory_mb: 2097152   # 2048 GB RAM
-      vcores: 1024          # 1024 Cores
+  - id: "prod-cluster"
+    name: "Production Hadoop YARN"
+    resourcemanager_url: "http://yarn-rm-1.company.local:8088"
+    auth_type: "kerberos"
+    service_principal: "yarn/yarn-rm-1.company.local@COMPANY.LOCAL"
     acl:
-      allowed_users: ["*"]
-      allowed_groups: ["*"]
-      roles:
-        admin:
-          groups: ["hadoop-admins"]
-        writer:
-          groups: ["yarn-operators"]
-        reader:
-          groups: ["*"]
+      admins: ["hadoop-admins"]
+      writers: ["yarn-operators"]
+      readers: ["*"]
 ```
 
 ---
 
 ## ☸️ Развертывание в Kubernetes (Helm)
 
-Для развертывания YARN Queue Explorer в кластере Kubernetes подготовлен готовый к production Helm-чарт в директории `helm/yarn-explorer`.
-
-### Возможности чарта:
-- **Безопасность**: Запуск от непривилегированного пользователя (`non-root`, UID 10001, `readOnlyRootFilesystem: false`).
-- **Персистентность**: Поддержка `PersistentVolumeClaim` для хранения локальной базы данных заявок SQLite (`/app/data/yarn_explorer.db`). При включенном PVC стратегия деплоя автоматически переключается на `Recreate`.
-- **Kerberos / SPNEGO**:
-  - Монтирование пользовательского `krb5.conf` через ConfigMap.
-  - Поддержка создания K8s Secret с `keytab` (из base64-строки) или подключение уже существующего секрета (`existingSecret`).
-- **Ingress**: Поддержка Ingress-контроллеров (включая `ingress-nginx`) с TLS-терминацией.
-- **Health Probes**: Настроенные Liveness и Readiness пробы по эндпоинту `/health`.
-- **Автоматический перезапуск подов**: При обновлении содержимого `config.yaml` или `krb5.conf` контроллер Deployment перезапускает поды за счет контрольных сумм в аннотациях (`checksum/config`, `checksum/krb5`).
-
-### Быстрая установка:
+В каталог `helm/yarn-explorer` включен готовый Helm-чарт со строгим харденингом безопасности:
+- Контейнер от непривилегированного пользователя (`UID 10001`, `readOnlyRootFilesystem`).
+- Сетевая изоляция через **NetworkPolicy** (только порты 8000, 53, 88, 636, YARN RMs).
+- Автоматическая инициализация Kerberos-билета (`kinit`) через `docker-entrypoint.sh`.
+- PersistentVolumeClaim для базы данных заявок Change Requests (`yarn_explorer.db`).
 
 ```bash
-# 1. Клонирование репозитория
-git clone https://github.com/balookrd/yarn-explorer.git
-cd yarn-explorer
-
-# 2. Установка чарта со стандартными настройками
-helm install yarn-explorer ./helm/yarn-explorer --namespace yarn-system --create-namespace
+# Установка чарта
+helm upgrade --install yarn-explorer ./helm/yarn-explorer \
+  --namespace yarn-system \
+  --create-namespace \
+  -f custom-values.yaml
 ```
 
-### Пример пользовательского `custom-values.yaml`:
-
-```yaml
-replicaCount: 1
-
-image:
-  repository: ghcr.io/balookrd/yarn-explorer
-  tag: "latest"
-  pullPolicy: IfNotPresent
-
-ingress:
-  enabled: true
-  className: "nginx"
-  hosts:
-    - host: yarn-explorer.company.local
-      paths:
-        - path: /
-          pathType: Prefix
-  tls:
-    - secretName: yarn-explorer-tls
-      hosts:
-        - yarn-explorer.company.local
-
-persistence:
-  enabled: true
-  size: 5Gi
-  storageClassName: "fast-storage"
-
-kerberos:
-  enabled: true
-  keytab:
-    # Можно передать base64-содержимое keytab-файла:
-    keytabBase64: "BQIAAABUAAI..."
-    # Или использовать предварительно созданный K8s Secret:
-    # existingSecret: "my-custom-keytab-secret"
-    # secretKey: "yarn-explorer.keytab"
-  krb5Conf: |
-    [libdefaults]
-      default_realm = COMPANY.LOCAL
-      dns_lookup_realm = false
-      dns_lookup_kdc = false
-      ticket_lifetime = 24h
-      renew_lifetime = 7d
-      forwardable = true
-    [realms]
-      COMPANY.LOCAL = {
-        kdc = kdc.company.local:88
-        admin_server = kdc.company.local:749
-      }
-
-config:
-  auth:
-    mode: ldap
-    jwt_secret: "prod-ultra-secure-random-jwt-secret-key"
-    token_expiry_hours: 12
-    ldap:
-      server: "ldaps://corp-ad.company.local:636"
-      base_dn: "DC=company,DC=local"
-      bind_dn: "CN=svc-yarn-explorer,OU=ServiceAccounts,DC=company,DC=local"
-      bind_password: "ServiceAccountPassword123"
-      user_search_base: "OU=Users,DC=company,DC=local"
-      group_search_base: "OU=Groups,DC=company,DC=local"
-      role_mapping:
-        admin_groups: ["CN=Hadoop-Admins,OU=Groups,DC=company,DC=local"]
-        writer_groups: ["CN=Hadoop-Operators,OU=Groups,DC=company,DC=local"]
-        reader_groups: ["CN=Hadoop-Analysts,OU=Groups,DC=company,DC=local"]
-  kerberos:
-    service_principal: "yarn-explorer@COMPANY.LOCAL"
-    keytab_path: "/etc/security/keytabs/yarn-explorer.keytab"
-    krb5_conf_path: "/etc/krb5.conf"
-  clusters:
-    - id: "prod-yarn"
-      name: "Production Hadoop"
-      description: "Hadoop 3.3 Production YARN Cluster"
-      rm_hosts:
-        - "rm1.company.local:8088"
-        - "rm2.company.local:8088"
-      kerberos_enabled: true
-      default_partition: "DEFAULT"
-```
-
-Применение параметров:
-```bash
-helm upgrade --install yarn-explorer ./helm/yarn-explorer -f custom-values.yaml -n yarn-system
-```
-
+Подробное руководство по параметрам чарта см. в **[helm/yarn-explorer/README.md](helm/yarn-explorer/README.md)**.
 
 ---
 
 ## 🧪 Тестирование
 
-Запуск набора автоматических тестов бэкенда:
+Запуск модульных и интеграционных тестов безопасности, балансировщика очередей и API:
 ```bash
-# В виртуальном окружении:
-pytest backend/tests
+# Запуск через pytest из корня проекта
+pytest
 
-# Или внутри запущенного Docker контейнера:
-docker exec yarn-demo-explorer pytest backend/tests
+# Запуск тестов внутри Docker-контейнера
+docker exec yarn-demo-explorer pytest
 ```
 
 Проверка типов и синтаксиса фронтенда:
@@ -468,43 +256,39 @@ yarn-explorer/
 ├── backend/                     # Бэкенд FastAPI (см. backend/README.md)
 │   ├── app/
 │   │   ├── api/                 # REST API роутеры (auth, clusters, queues, change_requests)
-│   │   ├── core/                # Конфигурация, безопасность, токены, база SQLite
-│   │   ├── models/              # Pydantic модели (QueueNode, Cluster, Balance, ChangeRequest)
-│   │   └── services/            # Бизнес-логика (YarnClient, CapacityScheduler, XmlGenerator)
-│   ├── tests/                   # Юнит-тесты на pytest
+│   │   ├── core/                # Конфигурация, безопасность, токены, LDAP, Kerberos
+│   │   ├── models/              # Pydantic-схемы данных
+│   │   └── services/            # Бизнес-логика (YarnClient, CapacityScheduler, Storage, XmlGenerator)
+│   ├── tests/                   # Автоматические тесты на pytest
+│   ├── docker-entrypoint.sh     # Инициализация Kerberos (kinit) и запуск сервиса
 │   ├── requirements.txt         # Зависимости Python
-│   └── README.md                # Документация бэкенда и REST API
+│   └── README.md                # Документация бэкенда и API
 ├── frontend/                    # Фронтенд Svelte 5 (см. frontend/README.md)
 │   ├── src/
-│   │   ├── components/          # Svelte-компоненты (таблица, drawer, модалки, QueueMappings, Diff)
-│   │   ├── utils/               # Утилиты форматирования RAM и vCPU
-│   │   ├── api/                 # Клиентский HTTP-сервис
-│   │   ├── App.svelte           # Корневой компонент приложения
+│   │   ├── components/          # UI-компоненты (QueueTreeTable, ResourceEditor, DiffPanel, Modals)
+│   │   ├── api/                 # Клиентский HTTP сервис
+│   │   ├── utils/               # Утилиты форматирования RAM/vCPU
+│   │   ├── App.svelte           # Главный компонент интерфейса
 │   │   └── types.ts             # TypeScript интерфейсы
 │   ├── package.json             # Зависимости и скрипты сборки
-│   ├── vite.config.ts           # Конфигурация сборщика Vite
-│   └── README.md                # Документация фронтенда и компонентов
-├── demo/                        # Полный демонстрационный стенд (Kerberos KDC, OpenLDAP, 2x Hadoop RM)
-│   ├── docker-compose.yml       # Спецификация сервисов демо-стенда
-│   ├── start-demo.sh            # Скрипт быстрого запуска стенда
-│   ├── stop-demo.sh             # Скрипт остановки и очистки томов
-│   ├── cluster-1/               # Hadoop RM 1 конфигурации (Production)
-│   ├── cluster-2/               # Hadoop RM 2 конфигурации (Analytics & ML)
-│   ├── kdc/                     # Kerberos KDC Dockerfile и скрипт инициализации
-│   ├── ldap/                    # OpenLDAP конфигурация и пользователи
-│   ├── config.yaml              # Конфиг YARN Explorer для демо-стенда
-│   └── README.md                # Ссылка на руководство DEMO.md
-├── helm/yarn-explorer/          # Production-ready Helm-чарт для развертывания в Kubernetes
+│   ├── vite.config.ts           # Конфигурация Vite и dev-прокси
+│   └── README.md                # Документация фронтенда
+├── demo/                        # Полный демо-стенд (Docker Compose, 2x YARN RM, KDC, LDAP)
+│   ├── docker-compose.yml       # Описание сервисов демо-стенда
+│   ├── start-demo.sh            # Скрипт быстрого запуска
+│   ├── stop-demo.sh             # Скрипт остановки и очистки
+│   └── config.yaml              # Конфигурационный файл демо-режима
+├── helm/yarn-explorer/          # Production Helm-чарт для развертывания в Kubernetes
 │   ├── Chart.yaml               # Описание и метаданные чарта
-│   ├── values.yaml              # Параметры по умолчанию (resources, ingress, kerberos, db)
-│   ├── templates/               # Манифесты K8s (Deployment, Service, Ingress, PVC, ConfigMap, Secret)
-│   └── README.md                # Документация чарта и таблица параметров
-├── Dockerfile                   # Production Dockerfile YARN Explorer
-├── DEMO.md                      # Подробное руководство по демонстрационному стенду
+│   ├── values.yaml              # Параметры по умолчанию
+│   ├── templates/               # Манифесты K8s (Deployment, Service, Ingress, PVC, NetworkPolicy)
+│   └── README.md                # Документация чарта и параметров values
+├── config/                      # Файлы конфигурации приложения (config.yaml)
+├── Dockerfile                   # Multi-stage Dockerfile YARN Explorer
+├── docker-compose.yml           # Базовый docker-compose сценарий
+├── pytest.ini                   # Конфигурация тестов pytest
+├── DEMO.md                      # Подробное руководство по демо-стенду и сценариям
 └── README.md                    # Главная документация проекта
-
-
-
 ```
 
 ---
