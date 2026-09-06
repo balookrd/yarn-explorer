@@ -1,8 +1,9 @@
 import logging
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.core.security import get_current_user
+from app.core.rate_limiter import get_client_ip
 from app.core.config import settings
 from app.core.acl import check_cluster_permission, resolve_cluster_role
 from app.models.auth import UserSession, Role
@@ -85,6 +86,7 @@ async def get_pending_count(
 @router.post("/", response_model=ChangeRequestResponse, status_code=status.HTTP_201_CREATED)
 async def create_change_request(
     request: ChangeRequestCreate,
+    http_request: Request,
     current_user: UserSession = Depends(get_current_user),
 ):
     """Создать заявку на изменение конфигурации очередей (роли writer и admin)."""
@@ -172,7 +174,7 @@ async def create_change_request(
     audit_log(
         action="CR_CREATED",
         username=current_user.username,
-        client_ip="internal",
+        client_ip=get_client_ip(http_request),
         details={"cr_id": cr_id, "cluster_id": request.cluster_id, "title": request.title, "changes_count": len(request.changes)},
         status="SUCCESS",
     )
@@ -200,6 +202,7 @@ async def get_change_request(
 async def approve_change_request(
     cr_id: int,
     review: ChangeRequestReview,
+    http_request: Request,
     current_user: UserSession = Depends(get_current_user),
 ):
     """Одобрить заявку на изменение и сгенерировать XML (только admin)."""
@@ -282,7 +285,7 @@ async def approve_change_request(
     audit_log(
         action="CR_APPROVED",
         username=current_user.username,
-        client_ip="internal",
+        client_ip=get_client_ip(http_request),
         details={"cr_id": cr_id, "cluster_id": cr.cluster_id, "author": cr.author, "comment": review.comment or ""},
         status="SUCCESS",
     )
@@ -294,6 +297,7 @@ async def approve_change_request(
 async def reject_change_request(
     cr_id: int,
     review: ChangeRequestReview,
+    http_request: Request,
     current_user: UserSession = Depends(get_current_user),
 ):
     """Отклонить заявку на изменение (только admin)."""
@@ -323,7 +327,7 @@ async def reject_change_request(
     audit_log(
         action="CR_REJECTED",
         username=current_user.username,
-        client_ip="internal",
+        client_ip=get_client_ip(http_request),
         details={"cr_id": cr_id, "cluster_id": cr.cluster_id, "author": cr.author, "comment": review.comment or ""},
         status="SUCCESS",
     )
@@ -334,6 +338,7 @@ async def reject_change_request(
 @router.post("/{cr_id}/cancel", response_model=ChangeRequestResponse)
 async def cancel_change_request(
     cr_id: int,
+    http_request: Request,
     current_user: UserSession = Depends(get_current_user),
 ):
     """Отозвать заявку (доступно автору или администратору)."""
@@ -358,5 +363,14 @@ async def cancel_change_request(
     success = storage_service.cancel_change_request(cr_id=cr_id, author=cr.author)
     if not success:
         raise HTTPException(status_code=500, detail="Ошибка при отзыве заявки")
+
+    from app.core.audit import audit_log
+    audit_log(
+        action="CR_CANCELLED",
+        username=current_user.username,
+        client_ip=get_client_ip(http_request),
+        details={"cr_id": cr_id, "cluster_id": cr.cluster_id, "author": cr.author},
+        status="SUCCESS",
+    )
 
     return storage_service.get_change_request(cr_id)

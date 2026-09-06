@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import List, Dict, Optional, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class QueueType(str, Enum):
@@ -137,12 +137,32 @@ class QueueDraftItem(BaseModel):
 DraftQueueItem = QueueDraftItem
 
 
+def validate_yarn_queue_mappings(v: Optional[str]) -> Optional[str]:
+    if v is None or not v.strip():
+        return v
+    import re
+    entries = [e.strip() for e in v.split(",") if e.strip()]
+    mapping_regex = re.compile(r"^(u|g):[%a-zA-Z0-9_\-\.\*]+:[a-zA-Z0-9_\-\.\%]+$")
+    for entry in entries:
+        if not mapping_regex.match(entry):
+            raise ValueError(
+                f"Некорректный формат маппинга очередей: '{entry}'. "
+                "Ожидается формат 'u:user:queue' или 'g:group:queue' (например, 'u:%user:%user,u:analyst:root.analytics')."
+            )
+    return v
+
+
 class DraftValidateRequest(BaseModel):
     cluster_id: str
     selected_partition: str = "DEFAULT"
     queues: List[QueueDraftItem]
     queue_mappings: Optional[str] = None
     queue_mappings_override: Optional[bool] = None
+
+    @field_validator("queue_mappings")
+    @classmethod
+    def check_queue_mappings(cls, v: Optional[str]) -> Optional[str]:
+        return validate_yarn_queue_mappings(v)
 
 
 class DraftValidateResponse(BaseModel):
@@ -215,6 +235,11 @@ class GenerateXmlRequest(BaseModel):
     resource_mode_override: Optional[str] = None  # percentage | absolute
     queue_mappings: Optional[str] = None
     queue_mappings_override: Optional[bool] = None
+
+    @field_validator("queue_mappings")
+    @classmethod
+    def check_queue_mappings(cls, v: Optional[str]) -> Optional[str]:
+        return validate_yarn_queue_mappings(v)
 
 
 class GenerateXmlResponse(BaseModel):

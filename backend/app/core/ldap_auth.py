@@ -120,7 +120,8 @@ class LdapService:
 
             # Способ 2: явный поиск в group_base_dn
             if self.config.group_base_dn and self.config.group_filter:
-                g_filter = self.config.group_filter.format(user_dn=user_dn)
+                safe_dn = escape_filter_chars(str(user_dn))
+                g_filter = self.config.group_filter.format(user_dn=safe_dn)
                 conn.search(
                     search_base=self.config.group_base_dn,
                     search_filter=g_filter,
