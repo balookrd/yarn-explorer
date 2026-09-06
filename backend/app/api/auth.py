@@ -127,6 +127,8 @@ async def login(
     return TokenResponse(access_token=token, user=user)
 
 
+@router.get("/negotiate", response_model=TokenResponse)
+@router.get("/sso", response_model=TokenResponse)
 @router.post("/spnego", response_model=TokenResponse)
 async def spnego_login(
     request: Request,

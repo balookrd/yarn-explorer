@@ -52,7 +52,7 @@
   - Защита от BOLA / IDOR в API заявок на согласование изменений (Change Requests).
   - Безопасный CORS с белым списком доменов и HTTP Security Headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Content-Security-Policy`).
   - Структурированный журнал аудита безопасности (Audit Log в формате JSON) для отслеживания всех критических операций (попытки входа, блокировки, создание и согласование заявок).
-  - Запуск Docker-контейнера от непривилегированного пользователя (`appuser`, UID 1000).
+  - Запуск Docker-контейнера от непривилегированного пользователя (`appuser`, UID 10001).
 
 ---
 
@@ -234,7 +234,7 @@ pip install -r requirements.txt
 
 # Запуск сервера разработки
 export CONFIG_PATH=../demo/config.yaml
-uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### 2. Запуск Frontend:
@@ -243,7 +243,7 @@ cd frontend
 npm install
 npm run dev
 ```
-Фронтенд будет доступен по адресу: `http://localhost:5173` (с автоматическим проксированием API-запросов на бэкенд `localhost:8080`).
+Фронтенд будет доступен по адресу: `http://localhost:5173` (с автоматическим проксированием API-запросов на бэкенд `localhost:8000`).
 
 ### 3. Сборка Frontend в production:
 ```bash
@@ -261,10 +261,10 @@ npm run build
 ```yaml
 server:
   host: "0.0.0.0"
-  port: 8080
+  port: 8000
   debug: false
   cors_origins:
-    - "http://localhost:8080"
+    - "http://localhost:8000"
     - "http://localhost:5173"
 
 auth:

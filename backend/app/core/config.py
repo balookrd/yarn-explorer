@@ -10,12 +10,12 @@ from app.models.auth import Role
 
 class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
-    port: int = 8080
+    port: int = 8000
     debug: bool = False
     cors_origins: List[str] = Field(
         default_factory=lambda: [
-            "http://localhost:8080",
-            "http://127.0.0.1:8080",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
             "http://localhost:5173",
             "http://127.0.0.1:5173",
         ]
@@ -95,13 +95,15 @@ class Settings(BaseSettings):
     clusters: List[ClusterConfig] = Field(default_factory=list)
 
     @classmethod
-    def load_from_yaml(cls, path: Optional[str] = None) -> "Settings":
-        config_path = path or os.environ.get("CONFIG_PATH", "config/config.yaml")
-        if not os.path.exists(config_path):
-            # Пробуем искать относительно родительского каталога
-            parent_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", config_path)
-            if os.path.exists(parent_path):
-                config_path = parent_path
+    def load_from_yaml(cls, config_path: Optional[str] = None) -> "Settings":
+        if not config_path:
+            config_path = os.environ.get("CONFIG_PATH")
+            if not config_path:
+                project_cfg = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "config", "config.yaml"))
+                if os.path.exists(project_cfg):
+                    config_path = project_cfg
+                else:
+                    config_path = "config/config.yaml"
 
         data = {}
         if os.path.exists(config_path):

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from jose import jwt, JWTError
+import jwt
 from fastapi import Request, HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -9,6 +9,50 @@ from app.core.config import settings
 from app.models.auth import UserSession, Role
 
 security_scheme = HTTPBearer(auto_error=False)
+
+
+def verify_csrf(request: Request, is_cookie_auth: bool):
+    """
+    Защита от Cross-Site Request Forgery (CWE-352).
+    Если запрос аутентифицирован через Cookie и изменяет состояние (POST, PUT, DELETE, PATCH),
+    требуется подтверждение легитимности источника (Sec-Fetch-Site, Origin, X-Requested-With).
+    """
+    if not is_cookie_auth:
+        return
+
+    if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+        sec_fetch_site = request.headers.get("Sec-Fetch-Site")
+        if sec_fetch_site in ("cross-site",):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="CSRF protection: межсайтовый запрос отклонен (Sec-Fetch-Site: cross-site)"
+            )
+
+        origin = request.headers.get("Origin")
+        referer = request.headers.get("Referer")
+        x_requested_with = request.headers.get("X-Requested-With")
+
+        if x_requested_with == "XMLHttpRequest":
+            return
+
+        if origin:
+            allowed = set(settings.server.cors_origins)
+            host = request.headers.get("Host", "")
+            if origin in allowed or any(origin.endswith(f"://{host}") or f"://{host}" in origin for _ in [1]):
+                return
+
+        if referer:
+            host = request.headers.get("Host", "")
+            if f"://{host}/" in referer or referer.endswith(f"://{host}"):
+                return
+
+        if not (origin or referer or x_requested_with):
+            return
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="CSRF protection: запрос отклонен политикой безопасности источника"
+        )
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -32,7 +76,7 @@ def decode_access_token(token: str) -> Optional[dict]:
             if storage_service.is_token_revoked(jti):
                 return None
         return payload
-    except JWTError:
+    except jwt.PyJWTError:
         return None
 
 
@@ -41,10 +85,12 @@ async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme)
 ) -> UserSession:
     token = None
+    is_cookie_auth = False
     if credentials:
         token = credentials.credentials
     elif "access_token" in request.cookies:
         token = request.cookies.get("access_token")
+        is_cookie_auth = True
 
     if not token:
         raise HTTPException(
@@ -52,6 +98,8 @@ async def get_current_user(
             detail="Требуется авторизация (отсутствует токен)",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    verify_csrf(request, is_cookie_auth)
 
     payload = decode_access_token(token)
     if not payload:

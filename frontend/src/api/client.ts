@@ -5,29 +5,42 @@ import type {
 
 const API_BASE = '/api';
 
+// Токен хранится только в оперативной памяти JS для текущей сессии (Zero LocalStorage),
+// предотвращая кражу через XSS. Основная авторизация в браузере опирается на HttpOnly Cookie.
+let memoryToken: string | null = null;
+
+try {
+  localStorage.removeItem('access_token');
+} catch (_) {}
+
 function getToken(): string | null {
-  return localStorage.getItem('access_token');
+  return memoryToken;
 }
 
-function setToken(token: string) {
-  localStorage.setItem('access_token', token);
+function setToken(token: string | null) {
+  memoryToken = token;
 }
 
 function clearToken() {
-  localStorage.removeItem('access_token');
+  memoryToken = null;
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
     ...(options.headers as Record<string, string> || {}),
   };
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const resp = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const resp = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers,
+    credentials: 'include',
+  });
 
   if (resp.status === 401) {
     clearToken();

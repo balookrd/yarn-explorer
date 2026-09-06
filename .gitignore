@@ -23,6 +23,7 @@ yarn-error.log*
 *.sqlite
 *.sqlite3
 data/
+**/data/
 
 # IDE
 .idea/

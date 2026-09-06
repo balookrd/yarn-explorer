@@ -24,12 +24,12 @@ podAnnotations: {}
 podLabels: {}
 
 podSecurityContext:
-  fsGroup: 1000
+  fsGroup: 10001
 
 securityContext:
   runAsNonRoot: true
-  runAsUser: 1000
-  runAsGroup: 1000
+  runAsUser: 10001
+  runAsGroup: 10001
   allowPrivilegeEscalation: false
   capabilities:
     drop:
@@ -55,7 +55,7 @@ envFrom: []
 service:
   type: ClusterIP
   port: 80
-  targetPort: 8080
+  targetPort: 8000
 
 ingress:
   enabled: false
@@ -151,11 +151,11 @@ affinity: {}
 config:
   server:
     host: "0.0.0.0"
-    port: 8080
+    port: 8000
     debug: false
     cors_origins:
-      - "http://localhost:8080"
-      - "http://127.0.0.1:8080"
+      - "http://localhost:8000"
+      - "http://127.0.0.1:8000"
       - "http://localhost:5173"
       - "http://127.0.0.1:5173"
 
@@ -251,3 +251,14 @@ config:
           reader:
             users: ["*"]
             groups: ["*"]
+
+# Настройка сетевых политик Kubernetes NetworkPolicy
+networkPolicy:
+  enabled: false
+  ingress:
+    from: []
+  egress:
+    allowDns: true
+    allowKerberos: true
+    allowLdap: true
+    allowYarn: true

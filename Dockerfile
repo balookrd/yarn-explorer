@@ -40,16 +40,19 @@ COPY demo/ ./demo/
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 # Создание непривилегированного пользователя и назначение прав
-RUN groupadd -g 1000 appgroup && \
-    useradd -u 1000 -g appgroup -m -s /bin/bash appuser && \
-    mkdir -p /app/data && \
-    chown -R appuser:appgroup /app
+RUN groupadd -g 10001 appuser && \
+    useradd -u 10001 -g appuser -m -s /bin/bash appuser && \
+    mkdir -p /app/data /etc/security/keytabs && \
+    touch /etc/krb5.conf && \
+    chown -R appuser:appuser /app /etc/krb5.conf /etc/security/keytabs && \
+    chmod +x /app/backend/docker-entrypoint.sh
 
-USER appuser
+USER 10001:10001
 
 ENV CONFIG_PATH=/app/config/config.yaml \
     PYTHONUNBUFFERED=1
 
-EXPOSE 8080
+EXPOSE 8000
 
-CMD ["python", "-m", "uvicorn", "app.main:app", "--app-dir", "backend", "--host", "0.0.0.0", "--port", "8080"]
+ENTRYPOINT ["/app/backend/docker-entrypoint.sh"]
+CMD ["python", "-m", "uvicorn", "app.main:app", "--app-dir", "backend", "--host", "0.0.0.0", "--port", "8000"]
