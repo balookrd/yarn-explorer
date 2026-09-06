@@ -15,13 +15,16 @@ RUN npm run build
 # ==========================================
 FROM python:3.12-slim
 
-# Системные зависимости для Kerberos и LDAP
+# Системные зависимости для Kerberos, SASL и LDAP
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libkrb5-dev \
+    libsasl2-dev \
+    libsasl2-modules-gssapi-mit \
     krb5-user \
     ldap-utils \
     curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

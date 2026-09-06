@@ -49,16 +49,18 @@ class LdapService:
                 # 2. Поиск пользователя (экранируем ввод для защиты от LDAP-инъекций)
                 safe_username = escape_filter_chars(username)
                 search_filter = self.config.user_filter.format(username=safe_username)
+                attributes = [
+                    self.config.user_display_name_attr,
+                    self.config.user_email_attr
+                ]
+                if conn.server.schema and any(k.lower() == "memberof" for k in conn.server.schema.attribute_types.keys()):
+                    attributes.append("memberOf")
+
                 conn.search(
                     search_base=self.config.user_base_dn,
                     search_filter=search_filter,
                     search_scope=SUBTREE,
-                    attributes=[
-                        self.config.user_display_name_attr,
-                        self.config.user_email_attr,
-                        "distinguishedName",
-                        "memberOf"
-                    ]
+                    attributes=attributes
                 )
 
                 if not conn.entries:
@@ -168,16 +170,18 @@ class LdapService:
             with Connection(server, user=bind_dn, password=bind_password, auto_bind=True) as conn:
                 safe_username = escape_filter_chars(username)
                 search_filter = self.config.user_filter.format(username=safe_username)
+                attributes = [
+                    self.config.user_display_name_attr,
+                    self.config.user_email_attr
+                ]
+                if conn.server.schema and any(k.lower() == "memberof" for k in conn.server.schema.attribute_types.keys()):
+                    attributes.append("memberOf")
+
                 conn.search(
                     search_base=self.config.user_base_dn,
                     search_filter=search_filter,
                     search_scope=SUBTREE,
-                    attributes=[
-                        self.config.user_display_name_attr,
-                        self.config.user_email_attr,
-                        "distinguishedName",
-                        "memberOf"
-                    ]
+                    attributes=attributes
                 )
 
                 if not conn.entries:

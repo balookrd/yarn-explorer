@@ -15,7 +15,7 @@ graph TD
         LDAP["yarn-demo-ldap<br/>(OpenLDAP :389)<br/>dc=company,dc=local"]
     end
 
-    subgraph "Кластеры Apache Hadoop YARN 3.3.6"
+    subgraph "Кластеры Apache Hadoop YARN 3.4.0"
         RM1["yarn-demo-rm-1<br/>(Production Cluster :8088)<br/>Kerberos Principal: yarn/yarn-rm-1..."]
         RM2["yarn-demo-rm-2<br/>(Analytics Cluster :8089)<br/>Kerberos Principal: yarn/yarn-rm-2..."]
     end
