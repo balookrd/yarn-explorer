@@ -28,6 +28,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Ошибка фоновой очистки SQLite: {e}")
 
+    # Fail-fast проверка слабых дефолтных секретов в боевом режиме
+    if settings.auth.mode != "mock":
+        insecure_defaults = (
+            "yarn-explorer-super-secret-key-change-in-production-random-hash",
+            "default-secret-key-change-it",
+            "change-this-in-production-secret-key-32-chars-long"
+        )
+        if settings.auth.jwt.secret_key in insecure_defaults or len(settings.auth.jwt.secret_key) < 32:
+            raise RuntimeError(
+                f"КРИТИЧЕСКАЯ ОШИБКА БЕЗОПАСНОСТИ: В режиме '{settings.auth.mode}' обнаружен дефолтный или слабый JWT_SECRET_KEY! "
+                "Задайте стойкий секретный ключ (минимум 32 символа) через переменную окружения JWT_SECRET_KEY."
+            )
+
     logger.info("=" * 60)
     logger.info("YARN Queue Explorer запущен")
     logger.info(f"  Режим аутентификации: {settings.auth.mode}")
