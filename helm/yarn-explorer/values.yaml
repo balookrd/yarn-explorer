@@ -27,13 +27,30 @@ podSecurityContext:
   fsGroup: 1000
 
 securityContext:
-  runAsNonRoot: false
-  # runAsUser: 1000
-  # readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
   allowPrivilegeEscalation: false
   capabilities:
     drop:
       - ALL
+
+# Дополнительные переменные окружения (для передачи JWT_SECRET_KEY, LDAP_BIND_PASSWORD из K8s Secrets)
+extraEnv: []
+# - name: JWT_SECRET_KEY
+#   valueFrom:
+#     secretKeyRef:
+#       name: yarn-explorer-secret
+#       key: jwt-secret-key
+# - name: LDAP_BIND_PASSWORD
+#   valueFrom:
+#     secretKeyRef:
+#       name: yarn-explorer-secret
+#       key: ldap-bind-password
+
+envFrom: []
+# - secretRef:
+#     name: yarn-explorer-secret
 
 service:
   type: ClusterIP
@@ -136,6 +153,11 @@ config:
     host: "0.0.0.0"
     port: 8080
     debug: false
+    cors_origins:
+      - "http://localhost:8080"
+      - "http://127.0.0.1:8080"
+      - "http://localhost:5173"
+      - "http://127.0.0.1:5173"
 
   auth:
     # Режимы: mock (для тестов), ldaps_only, kerberos_only, hybrid

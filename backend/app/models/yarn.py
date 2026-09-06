@@ -114,9 +114,9 @@ class QueueTreeResponse(BaseModel):
 
 # Модели для черновиков (Draft), Diff и генерации XML
 class QueueDraftItem(BaseModel):
-    path: str
-    name: str
-    parent_path: Optional[str] = None
+    path: str = Field(..., pattern=r"^root(\.[a-zA-Z0-9_\-]+)*$", description="Полный путь очереди, начиная с root")
+    name: str = Field(..., pattern=r"^[a-zA-Z0-9_\-]+$", description="Имя очереди (буквы, цифры, дефис, подчеркивание)")
+    parent_path: Optional[str] = Field(None, pattern=r"^root(\.[a-zA-Z0-9_\-]+)*$", description="Путь родительской очереди")
     action: str = "modify"  # modify | create | delete
     is_leaf: bool = True
     state: QueueState = QueueState.RUNNING

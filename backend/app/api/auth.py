@@ -1,12 +1,16 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from datetime import timedelta
+import secrets
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
+from fastapi.security import HTTPAuthorizationCredentials
 
 from app.core.config import settings
-from app.core.security import create_access_token, get_current_user
+from app.core.security import create_access_token, get_current_user, security_scheme
 from app.core.ldap_auth import ldap_service
 from app.core.kerberos import kerberos_manager
 from app.core.acl import _check_match
+from app.core.rate_limiter import auth_rate_limiter
 from app.models.auth import LoginRequest, UserSession, TokenResponse, Role
 
 logger = logging.getLogger(__name__)
@@ -26,25 +30,43 @@ def _resolve_global_role(username: str, groups: list) -> Role:
 
 
 def _mock_authenticate(username: str, password: str):
-    """Аутентификация через mock-пользователей."""
+    """Аутентификация через mock-пользователей с поддержкой bcrypt и защитой от timing attacks."""
     for mock_user in settings.auth.mock_users:
-        if mock_user.username == username and mock_user.password == password:
-            role = _resolve_global_role(username, mock_user.groups)
-            return UserSession(
-                username=mock_user.username,
-                display_name=mock_user.display_name,
-                email=mock_user.email,
-                groups=mock_user.groups,
-                auth_method="mock",
-                is_admin=(role == Role.ADMIN),
-                system_role=role,
-            )
+        if secrets.compare_digest(mock_user.username, username):
+            password_valid = False
+            if mock_user.password_hash:
+                import bcrypt
+                try:
+                    password_valid = bcrypt.checkpw(
+                        password.encode("utf-8"),
+                        mock_user.password_hash.encode("utf-8"),
+                    )
+                except Exception:
+                    password_valid = False
+            elif mock_user.password:
+                password_valid = secrets.compare_digest(mock_user.password, password)
+
+            if password_valid:
+                role = _resolve_global_role(username, mock_user.groups)
+                return UserSession(
+                    username=mock_user.username,
+                    display_name=mock_user.display_name,
+                    email=mock_user.email,
+                    groups=mock_user.groups,
+                    auth_method="mock",
+                    is_admin=(role == Role.ADMIN),
+                    system_role=role,
+                )
     return None
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest):
-    """Эндпоинт авторизации: поддержка mock, LDAP, hybrid."""
+async def login(
+    body: LoginRequest,
+    response: Response,
+    _rate_limit=Depends(auth_rate_limiter),
+):
+    """Эндпоинт авторизации: поддержка mock, LDAP, hybrid с rate limiting и HttpOnly cookie."""
     user = None
     mode = settings.auth.mode
 
@@ -72,12 +94,27 @@ async def login(body: LoginRequest):
         expires_delta=timedelta(minutes=settings.auth.jwt.expire_minutes),
     )
 
+    # Установка безопасной HttpOnly cookie
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        max_age=settings.auth.jwt.expire_minutes * 60,
+        httponly=True,
+        samesite="lax",
+        secure=not settings.server.debug,
+        path="/",
+    )
+
     return TokenResponse(access_token=token, user=user)
 
 
 @router.post("/spnego", response_model=TokenResponse)
-async def spnego_login(request: Request):
-    """Kerberos SPNEGO SSO авторизация."""
+async def spnego_login(
+    request: Request,
+    response: Response,
+    _rate_limit=Depends(auth_rate_limiter),
+):
+    """Kerberos SPNEGO SSO авторизация с rate limiting и HttpOnly cookie."""
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Negotiate "):
         raise HTTPException(
@@ -101,6 +138,17 @@ async def spnego_login(request: Request):
         data={"user": user.model_dump()},
         expires_delta=timedelta(minutes=settings.auth.jwt.expire_minutes),
     )
+
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        max_age=settings.auth.jwt.expire_minutes * 60,
+        httponly=True,
+        samesite="lax",
+        secure=not settings.server.debug,
+        path="/",
+    )
+
     return TokenResponse(access_token=token, user=user)
 
 
@@ -111,6 +159,37 @@ async def get_me(user: UserSession = Depends(get_current_user)):
 
 
 @router.post("/logout")
-async def logout():
-    """Выход: клиент удаляет токен самостоятельно."""
-    return {"detail": "Сессия завершена"}
+async def logout(
+    request: Request,
+    response: Response,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
+):
+    """Выход: отзыв токена на стороне сервера (blacklist) и удаление cookie."""
+    token = None
+    if credentials:
+        token = credentials.credentials
+    elif "access_token" in request.cookies:
+        token = request.cookies.get("access_token")
+
+    if token:
+        from app.core.security import decode_access_token
+        from app.services.storage import storage_service
+        # Декодируем токен без проверки на отзыв, чтобы извлечь jti для отзыва
+        try:
+            from jose import jwt
+            payload = jwt.decode(
+                token,
+                settings.auth.jwt.secret_key,
+                algorithms=[settings.auth.jwt.algorithm],
+                options={"verify_exp": False},
+            )
+            jti = payload.get("jti")
+            if jti:
+                exp = payload.get("exp")
+                exp_iso = datetime.fromtimestamp(exp, timezone.utc).isoformat() if exp else datetime.now(timezone.utc).isoformat()
+                storage_service.revoke_token(jti, exp_iso)
+        except Exception as e:
+            logger.debug(f"Ошибка при отзыве токена во время logout: {e}")
+
+    response.delete_cookie(key="access_token", path="/")
+    return {"detail": "Сессия успешно завершена и токен отозван"}

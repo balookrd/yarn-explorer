@@ -39,6 +39,14 @@ COPY demo/ ./demo/
 # Копирование собранного Frontend из этапа 1
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
+# Создание непривилегированного пользователя и назначение прав
+RUN groupadd -g 1000 appgroup && \
+    useradd -u 1000 -g appgroup -m -s /bin/bash appuser && \
+    mkdir -p /app/data && \
+    chown -R appuser:appgroup /app
+
+USER appuser
+
 ENV CONFIG_PATH=/app/config/config.yaml \
     PYTHONUNBUFFERED=1
 

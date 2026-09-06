@@ -72,6 +72,16 @@ helm uninstall yarn-explorer --namespace yarn-system
 | `ingress.hosts` | Список виртуальных хостов и путей | `[{host: "yarn-explorer.local", paths: [{path: "/", pathType: "Prefix"}]}]` |
 | `ingress.tls` | Настройки TLS сертификатов | `[]` |
 
+### Безопасность и переменные окружения
+
+| Параметр | Описание | Значение по умолчанию |
+|---|---|---|
+| `securityContext.runAsNonRoot` | Запуск от непривилегированного пользователя | `true` |
+| `securityContext.runAsUser` | UID непривилегированного пользователя | `1000` |
+| `securityContext.runAsGroup` | GID группы пользователя | `1000` |
+| `extraEnv` | Список дополнительных env-переменных (включая secretKeyRef) | `[]` |
+| `envFrom` | Источники envFrom (например, secretRef с секретами) | `[]` |
+
 ### Ресурсы и Probes
 
 | Параметр | Описание | Значение по умолчанию |
@@ -158,32 +168,43 @@ kerberos:
       }
 
 config:
+  server:
+    host: "0.0.0.0"
+    port: 8080
+    debug: false
+    cors_origins:
+      - "https://yarn-explorer.company.local"
   auth:
-    mode: ldap
-    jwt_secret: "super-secure-production-jwt-token-key-2026"
-    token_expiry_hours: 12
+    mode: "hybrid"
+    jwt:
+      secret_key: "super-secure-production-jwt-token-key-2026"
+      expire_minutes: 720
     ldap:
-      server: "ldaps://corp-ad.company.local:636"
-      base_dn: "DC=company,DC=local"
+      enabled: true
+      server_uri: "ldaps://corp-ad.company.local:636"
+      use_ssl: true
       bind_dn: "CN=svc-yarn-explorer,OU=ServiceAccounts,DC=company,DC=local"
       bind_password: "ProdServicePasswordHere"
-      user_search_base: "OU=Users,DC=company,DC=local"
-      group_search_base: "OU=Groups,DC=company,DC=local"
-      role_mapping:
-        admin_groups: ["CN=Hadoop-Admins,OU=Groups,DC=company,DC=local"]
-        writer_groups: ["CN=Hadoop-Operators,OU=Groups,DC=company,DC=local"]
-        reader_groups: ["CN=Hadoop-Analysts,OU=Groups,DC=company,DC=local"]
-  kerberos:
-    service_principal: "yarn-explorer@COMPANY.LOCAL"
-    keytab_path: "/etc/security/keytabs/yarn-explorer.keytab"
-    krb5_conf_path: "/etc/krb5.conf"
+      user_base_dn: "OU=Users,DC=company,DC=local"
+      user_filter: "(&(objectClass=user)(sAMAccountName={username}))"
+  acl:
+    ui_access:
+      allowed_users: ["*"]
+      allowed_groups: ["*"]
+    roles:
+      admin:
+        groups: ["Hadoop-Admins"]
+      writer:
+        groups: ["Hadoop-Operators"]
+      reader:
+        groups: ["*"]
   clusters:
     - id: "prod-yarn"
       name: "Production Hadoop"
       description: "Hadoop 3.3 Production YARN Cluster"
-      rm_hosts:
-        - "rm1.company.local:8088"
-        - "rm2.company.local:8088"
+      resource_manager_urls:
+        - "http://rm1.company.local:8088"
+        - "http://rm2.company.local:8088"
       kerberos_enabled: true
       default_partition: "DEFAULT"
 ```

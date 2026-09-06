@@ -1,6 +1,7 @@
 import logging
 from typing import Optional, List, Tuple
 from ldap3 import Server, Connection, ALL, Tls, SUBTREE
+from ldap3.utils.conv import escape_filter_chars
 import ssl
 
 from app.core.config import settings
@@ -22,10 +23,10 @@ class LdapService:
 
         try:
             tls_configuration = None
-            if self.config.use_ssl and self.config.ca_cert_file:
+            if self.config.use_ssl:
                 tls_configuration = Tls(
                     validate=ssl.CERT_REQUIRED,
-                    ca_certs_file=self.config.ca_cert_file
+                    ca_certs_file=self.config.ca_cert_file if self.config.ca_cert_file else None
                 )
 
             server = Server(
@@ -41,8 +42,9 @@ class LdapService:
             bind_password = self.config.bind_password or None
 
             with Connection(server, user=bind_dn, password=bind_password, auto_bind=True) as conn:
-                # 2. Поиск пользователя
-                search_filter = self.config.user_filter.format(username=username)
+                # 2. Поиск пользователя (экранируем ввод для защиты от LDAP-инъекций)
+                safe_username = escape_filter_chars(username)
+                search_filter = self.config.user_filter.format(username=safe_username)
                 conn.search(
                     search_base=self.config.user_base_dn,
                     search_filter=search_filter,

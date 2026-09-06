@@ -37,11 +37,21 @@
 - **Поддержка множества кластеров**: единая точка управления для Production, Analytics, ML и других YARN-кластеров с переключением в реальном времени.
 - **Kerberos & SPNEGO**: аутентификация запросов к YARN ResourceManager REST API через защищенный Kerberos SPNEGO (с поддержкой keytab и `krb5.conf`).
 - **Корпоративный RBAC & LDAP**:
-  - Аутентификация пользователей через корпоративный каталог OpenLDAP / Active Directory или локальный список пользователей.
-  - Ролевая модель доступа:
-    - **ADMIN** — просмотр, добавление/удаление очередей, редактирование, балансировка, генерация `capacity-scheduler.xml`.
-    - **WRITER** — просмотр, редактирование параметров очередей, моделирование изменений и просмотр diff.
+  - Аутентификация пользователей через корпоративный каталог OpenLDAP / Active Directory, SPNEGO SSO или локальный/mock список пользователей.
+  - Двухуровневый контроль доступа (глобальные политики `ui_access` и ролевые политики для каждого кластера):
+    - **ADMIN** — просмотр, добавление/удаление очередей, редактирование, балансировка, согласование заявок, генерация `capacity-scheduler.xml`.
+    - **WRITER** — просмотр, редактирование параметров очередей, моделирование изменений, подача заявок на согласование и просмотр diff.
     - **READER** — безопасный режим только для чтения топологии и метрик утилизации очередей.
+- **Эшелонированная защита (OWASP Top 10)**:
+  - Серверная инвалидация JWT при выходе (Blacklist отзыв токенов по `jti`).
+  - Ограничение частоты запросов (Rate Limiting) на эндпоинтах авторизации от перебора паролей и DoS.
+  - Безопасные сессии через `HttpOnly`, `SameSite=Lax` cookies.
+  - Поддержка безопасного хранения хэшей паролей (Bcrypt).
+  - Защита от LDAP-инъекций и обязательная валидация TLS-сертификатов серверов каталога.
+  - Защита от XML Comment / Configuration Injection при генерации `capacity-scheduler.xml`.
+  - Защита от BOLA / IDOR в API заявок на согласование изменений (Change Requests).
+  - Безопасный CORS с белым списком доменов и HTTP Security Headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`).
+  - Запуск Docker-контейнера от непривилегированного пользователя (`appuser`, UID 1000).
 
 ---
 
@@ -236,38 +246,71 @@ npm run build
 Сервис настраивается через YAML-файл (путь задается переменной окружения `CONFIG_PATH`):
 
 ```yaml
-auth:
-  mode: hybrid          # ldap, local или hybrid
-  jwt_secret: "your-secret-key"
-  token_expiry_hours: 8
-  ldap:
-    server: "ldap://ldap:389"
-    base_dn: "dc=company,dc=local"
-    bind_dn: "cn=admin,dc=company,dc=local"
-    bind_password: "adminpassword"
-    user_search_base: "ou=users,dc=company,dc=local"
-    group_search_base: "ou=groups,dc=company,dc=local"
-    role_mapping:
-      admin_groups: ["hadoop-admins"]
-      writer_groups: ["yarn-operators"]
-      reader_groups: ["bi-analysts"]
+server:
+  host: "0.0.0.0"
+  port: 8080
+  debug: false
+  cors_origins:
+    - "http://localhost:8080"
+    - "http://localhost:5173"
 
-kerberos:
-  service_principal: "yarn-explorer@COMPANY.LOCAL"
-  keytab_path: "/etc/security/keytabs/yarn-explorer.keytab"
-  krb5_conf_path: "/etc/krb5.conf"
+auth:
+  mode: "hybrid"          # mock | ldaps_only | kerberos_only | hybrid
+  jwt:
+    secret_key: "CHANGE-ME-IN-PRODUCTION-RANDOM-SECRET"
+    algorithm: "HS256"
+    expire_minutes: 480
+  ldap:
+    enabled: true
+    server_uri: "ldaps://ad.company.local:636"
+    use_ssl: true
+    bind_dn: "cn=svc_yarn_explorer,ou=services,dc=company,dc=local"
+    bind_password: "ServicePasswordHere"
+    user_base_dn: "ou=users,dc=company,dc=local"
+    user_filter: "(&(objectClass=user)(sAMAccountName={username}))"
+  kerberos:
+    enabled: true
+    keytab_file: "/etc/security/keytabs/yarn-explorer.keytab"
+    service_principal: "HTTP/yarn-explorer.company.local@COMPANY.LOCAL"
+
+acl:
+  ui_access:
+    allowed_users: ["*"]
+    allowed_groups: ["*"]
+  roles:
+    admin:
+      groups: ["hadoop-admins", "platform-admins"]
+    writer:
+      groups: ["yarn-operators", "data-engineers"]
+    reader:
+      groups: ["*"]
 
 clusters:
   - id: "prod-yarn"
     name: "Production Hadoop Cluster"
     description: "Основной производственный YARN кластер"
-    rm_hosts:
-      - "yarn-rm-1:8088"
+    resource_manager_urls:
+      - "http://rm1.prod.company.local:8088"
+      - "http://rm2.prod.company.local:8088"
     kerberos_enabled: true
+    kerberos_principal: "yarn/rm1.prod.company.local@COMPANY.LOCAL"
+    impersonation_enabled: true
     default_partition: "DEFAULT"
+    partitions: ["DEFAULT", "GPU"]
+    resource_mode: "percentage"
     total_resources:
       memory_mb: 2097152   # 2048 GB RAM
       vcores: 1024          # 1024 Cores
+    acl:
+      allowed_users: ["*"]
+      allowed_groups: ["*"]
+      roles:
+        admin:
+          groups: ["hadoop-admins"]
+        writer:
+          groups: ["yarn-operators"]
+        reader:
+          groups: ["*"]
 ```
 
 ---

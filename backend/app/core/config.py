@@ -11,12 +11,21 @@ from app.models.auth import Role
 class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8080
-    debug: bool = True
+    debug: bool = False
+    cors_origins: List[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:8080",
+            "http://127.0.0.1:8080",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ]
+    )
 
 
 class MockUserConfig(BaseModel):
     username: str
-    password: str
+    password: Optional[str] = None
+    password_hash: Optional[str] = None
     display_name: str
     email: Optional[str] = None
     groups: List[str] = Field(default_factory=list)
@@ -94,11 +103,37 @@ class Settings(BaseSettings):
             if os.path.exists(parent_path):
                 config_path = parent_path
 
+        data = {}
         if os.path.exists(config_path):
             with open(config_path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
-                return cls(**data)
-        return cls()
+
+        inst = cls(**data)
+
+        # Переопределение секретов и параметров из переменных окружения
+        env_jwt_secret = os.environ.get("JWT_SECRET_KEY")
+        if env_jwt_secret:
+            inst.auth.jwt.secret_key = env_jwt_secret
+
+        env_ldap_password = os.environ.get("LDAP_BIND_PASSWORD")
+        if env_ldap_password:
+            inst.auth.ldap.bind_password = env_ldap_password
+
+        env_debug = os.environ.get("SERVER_DEBUG")
+        if env_debug is not None:
+            inst.server.debug = env_debug.lower() in ("1", "true", "yes")
+
+        env_cors = os.environ.get("CORS_ORIGINS")
+        if env_cors:
+            inst.server.cors_origins = [o.strip() for o in env_cors.split(",") if o.strip()]
+
+        if inst.auth.jwt.secret_key in ("default-secret-key-change-it", "yarn-explorer-super-secret-key-change-in-production-random-hash"):
+            import logging
+            logging.getLogger("app.core.config").warning(
+                "ВНИМАНИЕ БЕЗОПАСНОСТИ: Используется стандартный секретный ключ JWT. "
+                "Обязательно замените settings.auth.jwt.secret_key в продакшн-окружении или через переменную JWT_SECRET_KEY!"
+            )
+        return inst
 
 
 settings = Settings.load_from_yaml()

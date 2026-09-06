@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import jwt, JWTError
@@ -16,7 +17,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         expire = datetime.now(timezone.utc) + expires_delta
     else:
         expire = datetime.now(timezone.utc) + timedelta(minutes=settings.auth.jwt.expire_minutes)
-    to_encode.update({"exp": expire})
+    jti = str(uuid.uuid4())
+    to_encode.update({"exp": expire, "jti": jti})
     encoded_jwt = jwt.encode(to_encode, settings.auth.jwt.secret_key, algorithm=settings.auth.jwt.algorithm)
     return encoded_jwt
 
@@ -24,6 +26,11 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 def decode_access_token(token: str) -> Optional[dict]:
     try:
         payload = jwt.decode(token, settings.auth.jwt.secret_key, algorithms=[settings.auth.jwt.algorithm])
+        jti = payload.get("jti")
+        if jti:
+            from app.services.storage import storage_service
+            if storage_service.is_token_revoked(jti):
+                return None
         return payload
     except JWTError:
         return None
@@ -61,4 +68,12 @@ async def get_current_user(
             detail="Некорректная структура токена пользователя",
         )
 
-    return UserSession(**user_dict)
+    user = UserSession(**user_dict)
+    from app.core.acl import check_ui_access
+    if not check_ui_access(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Доступ к системе запрещен политикой UI Access",
+        )
+
+    return user

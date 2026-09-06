@@ -1,6 +1,6 @@
 # Backend: YARN Queue Explorer
 
-Бэкенд-сервис приложения **YARN Queue Explorer**, реализованный на базе **FastAPI (Python 3.12)**. Сервис обеспечивает взаимодействие с кластерами Apache Hadoop YARN через Kerberos SPNEGO, аутентификацию пользователей через OpenLDAP / Active Directory, персистентное хранение заявок на согласование в SQLite и генерацию конфигурации `capacity-scheduler.xml`.
+Бэкенд-сервис приложения **YARN Queue Explorer**, реализованный на базе **FastAPI (Python 3.12)**. Сервис обеспечивает взаимодействие с кластерами Apache Hadoop YARN через Kerberos SPNEGO, корпоративную аутентификацию пользователей через OpenLDAP / Active Directory или Mock/Local провайдеры, персистентное хранение заявок на согласование в SQLite и безопасную генерацию конфигурации `capacity-scheduler.xml`.
 
 ---
 
@@ -10,51 +10,93 @@
 backend/
 ├── app/
 │   ├── api/                     # REST API контроллеры
-│   │   ├── auth.py              # Аутентификация (/api/auth/login, /api/auth/me, /api/auth/logout)
-│   │   ├── clusters.py          # Список кластеров и метаданные (/api/clusters)
-│   │   ├── queues.py            # Дерево очередей, балансировка, экспорт (/api/queues)
-│   │   └── change_requests.py   # Заявки на согласование (/api/queues/{cluster_id}/change-requests)
+│   │   ├── auth.py              # Аутентификация (/api/auth/login, /spnego, /me, /logout)
+│   │   ├── clusters.py          # Список кластеров (/api/clusters)
+│   │   ├── queues.py            # Очереди, валидация, diff, XML (/api/clusters/{cluster_id}/...)
+│   │   └── change_requests.py   # Управление заявками (/api/change-requests)
 │   ├── core/                    # Ядро сервиса
-│   │   ├── config.py            # Загрузка и валидация config.yaml (Pydantic Settings)
-│   │   ├── security.py          # Хеширование паролей, JWT-токены
-│   │   └── database.py          # SQLite база данных (таблицы change_requests, audits)
+│   │   ├── acl.py               # Проверка ACL (check_ui_access, resolve_cluster_role, check_cluster_permission)
+│   │   ├── config.py            # Pydantic Settings, загрузка config.yaml
+│   │   ├── kerberos.py          # KerberosManager (kinit, SPNEGO)
+│   │   ├── ldap_auth.py         # LdapService с защитой от LDAP-инъекций и валидацией TLS
+│   │   └── security.py          # JWT-токены, get_current_user с валидацией UI ACL
 │   ├── models/                  # Pydantic-модели и схемы данных
-│   │   ├── queue.py             # QueueNode, QueueMetrics, QueuePartitionInfo
-│   │   ├── cluster.py           # ClusterConfig, TotalResources
-│   │   ├── balance.py           # BalanceValidationResult, AutoBalanceRequest
-│   │   └── change_request.py    # ChangeRequest, ChangeRequestStatus, DiffPayload
+│   │   ├── auth.py              # UserSession, Role, TokenResponse, LoginRequest
+│   │   ├── cluster.py           # ClusterConfig, ClusterAcl, ClusterResources
+│   │   ├── yarn.py              # QueueNode, QueueDraftItem (с regex-валидацией), PartitionResourceConfig
+│   │   └── change_requests.py   # ChangeRequestCreate, ChangeRequestReview, ChangeRequestResponse
 │   ├── services/                # Бизнес-логика
-│   │   ├── auth_service.py      # LDAP / Local гибридная аутентификация
-│   │   ├── yarn_client.py       # REST API клиент YARN с поддержкой Kerberos SPNEGO
-│   │   ├── capacity_service.py  # Парсинг и валидация иерархий очередей
-│   │   ├── xml_generator.py     # Точечная модификация capacity-scheduler.xml
-│   │   └── change_request_service.py # Управление жизненным циклом заявок (Submit -> Approve/Reject)
-│   └── main.py                  # Входная точка приложения FastAPI, роутинг, CORS, /health
+│   │   ├── capacity_scheduler.py# Алгоритмы проверки баланса очередей
+│   │   ├── mock_yarn.py         # Mock данные для dev режима
+│   │   ├── storage.py           # Хранилище заявок в SQLite (WAL-режим, timeout=30s)
+│   │   ├── xml_generator.py     # Точечная модификация capacity-scheduler.xml с санитизацией
+│   │   └── yarn_client.py       # REST API клиент YARN RM с поддержкой Kerberos SPNEGO и HA
+│   └── main.py                  # Входная точка FastAPI, безопасный CORS, Security Headers, /health
 └── tests/                       # Автоматические тесты на pytest
+    ├── test_capacity_scheduler.py # Тесты балансировки и генерации XML
+    ├── test_change_requests.py   # Тесты CRUD хранилища заявок
+    └── test_security.py          # Тесты безопасности (инъекции, BOLA, ACL, валидация)
 ```
+
+---
+
+## 🛡️ Безопасность (Security Architecture)
+
+В сервисе реализован комплекс защитных мер для соответствия лучшим практикам информационной безопасности (OWASP Top 10):
+
+1. **Защита от инъекций**:
+   - **LDAP Filter Injection**: Входные данные пользователя экранируются через `ldap3.utils.conv.escape_filter_chars` перед передачей в фильтры поиска каталогов.
+   - **XML Comment / Configuration Injection**: Поля `comment` и `generated_by` экранируются функцией `_sanitize_xml_comment`, исключающей разрыв XML-комментариев (`-->`) и внедрение недопустимых свойств в `capacity-scheduler.xml`.
+2. **Защита от BOLA / IDOR (Broken Object Level Authorization)**:
+   - Доступ к деталям заявки (`GET /api/change-requests/{id}`) и просмотр списков заявок строго ограничены проверкой прав пользователя в соответствующем кластере (`check_cluster_permission(user, cluster, Role.READER)`).
+3. **Двухуровневый контроль доступа (RBAC & UI ACL)**:
+   - `check_ui_access`: проверка права доступа пользователя к интерфейсу и API на основе глобальных политик `acl.ui_access`.
+   - `resolve_cluster_role` & `check_cluster_permission`: гранулярное разделение прав по каждому кластеру (ADMIN, WRITER, READER).
+4. **Безопасная конфигурация сети и заголовков**:
+   - **CORS**: Запрещено использование `allow_origins=["*"]` при передаче учётных данных; разрешены только доверенные домены из `server.cors_origins`.
+   - **HTTP Security Headers**: Автоматически добавляются заголовки `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`.
+5. **Защита от атак по времени (Timing Attacks) и Bcrypt**:
+   - Проверка учётных данных пользователей в локальном/mock режиме выполняется в константное время с помощью `secrets.compare_digest`. Поддерживается хранение криптографических bcrypt-хэшей (`password_hash`) с валидацией через `bcrypt.checkpw`.
+6. **Серверная инвалидация токенов (Token Revocation / Blacklist)**:
+   - При завершении сессии (`POST /api/auth/logout`) токен извлекается и помещается в серверный чёрный список (`revoked_tokens` в SQLite) по уникальному идентификатору `jti` вплоть до даты его истечения. Повторные запросы с отозванным токеном возвращают `401 Unauthorized`.
+7. **Защита от брутфорса (Rate Limiting)**:
+   - Эндпоинты аутентификации (`/api/auth/login` и `/api/auth/spnego`) защищены ограничителем частоты запросов на базе скользящего окна (`RateLimiter(max_requests=10, window_seconds=60)`). При превышении лимита возвращается `429 Too Many Requests` с заголовком `Retry-After`.
+8. **Безопасные сессии (HttpOnly Cookies)**:
+   - При входе в систему клиенту выставляется сессионная cookie `access_token` с флагами `HttpOnly`, `SameSite=Lax`, `Path=/` (и `Secure` в продакшне). При выходе cookie автоматически очищается.
+9. **Управление секретами через переменные окружения**:
+   - Чувствительные параметры (`JWT_SECRET_KEY`, `LDAP_BIND_PASSWORD`) могут передаваться через переменные окружения контейнера, исключая хранение секретов в открытом виде в конфигурационных файлах.
+10. **Строгая валидация входных данных**:
+   - Имена очередей и их иерархические пути валидируются строгими регулярными выражениями (`pattern=r"^[a-zA-Z0-9_\-]+$"`, `pattern=r"^root(\.[a-zA-Z0-9_\-]+)*$"`), что исключает внедрение спецсимволов и искажение ключей конфигурации.
+11. **Конкурентная надёжность базы данных**:
+   - Подключения SQLite сконфигурированы с `timeout=30.0` и журналом упреждающей записи `PRAGMA journal_mode=WAL;`, что предотвращает отказы из-за взаимных блокировок базы данных при одновременных запросах.
 
 ---
 
 ## 🌐 Спецификация REST API
 
 ### Аутентификация (`/api/auth`)
-- `POST /api/auth/login` — аутентификация по логину и паролю (LDAP / Local). Возвращает JWT Bearer токен.
-- `GET /api/auth/me` — получение профиля текущего пользователя и его роли (ADMIN, WRITER, READER).
-- `POST /api/auth/logout` — завершение сессии.
+- `POST /api/auth/login` — аутентификация по логину и паролю (LDAP / Mock / Hybrid). Выставляет `HttpOnly` cookie `access_token` и возвращает JWT токен. Защищено Rate Limiter (10 запросов в минуту).
+- `POST /api/auth/spnego` — аутентификация Kerberos SPNEGO SSO через заголовок `Authorization: Negotiate <token>`. Защищено Rate Limiter.
+- `GET /api/auth/me` — получение профиля текущего пользователя и его роли.
+- `POST /api/auth/logout` — завершение сессии, серверный отзыв токена (blacklist) и удаление сессионной cookie.
 
 ### Кластеры (`/api/clusters`)
-- `GET /api/clusters` — список доступных YARN-кластеров с описаниями и типами безопасности.
-- `GET /api/clusters/{cluster_id}` — детальная конфигурация кластера (ресурсы, партиции).
+- `GET /api/clusters` — список доступных пользователю YARN-кластеров с ролями и метаданными.
 
-### Очереди и балансировка (`/api/queues`)
-- `GET /api/queues/{cluster_id}` — получение полного дерева очередей (Live состояние из YARN RM).
-- `POST /api/queues/{cluster_id}/balance` — валидация инварианта 100% и расчет автобалансировки веток очередей.
-- `POST /api/queues/{cluster_id}/xml` — точечная генерация `capacity-scheduler.xml` с сохранением сторонних параметров кластера.
+### Очереди и моделирование (`/api/clusters/{cluster_id}`)
+- `GET /api/clusters/{cluster_id}/queues` — получение дерева очередей и метрик утилизации кластера. Доступно: `READER`, `WRITER`, `ADMIN`.
+- `POST /api/clusters/{cluster_id}/validate` — валидация баланса ресурсов веток очередей (RAM / vCPU). Доступно: `WRITER`, `ADMIN`.
+- `POST /api/clusters/{cluster_id}/diff` — расчет дельты изменений между live и draft состоянием. Доступно: `WRITER`, `ADMIN`.
+- `POST /api/clusters/{cluster_id}/generate-xml` — генерация `capacity-scheduler.xml`. Доступно: только `ADMIN`.
 
-### Заявки на согласование (`/api/queues/{cluster_id}/change-requests`)
-- `GET /api/queues/{cluster_id}/change-requests` — получение списка заявок с фильтрами по статусу (`SUBMITTED`, `APPROVED`, `REJECTED`).
-- `POST /api/queues/{cluster_id}/change-requests` — создание новой заявки оператором (WRITER) с обоснованием.
-- `PUT /api/queues/{cluster_id}/change-requests/{request_id}` — согласование (Approve) или отклонение (Reject) заявки администратором.
+### Заявки на согласование (`/api/change-requests`)
+- `GET /api/change-requests` — список заявок с фильтрацией по кластеру и статусу (только для разрешенных кластеров).
+- `GET /api/change-requests/pending-count` — количество заявок в статусе `SUBMITTED`, доступных пользователю.
+- `GET /api/change-requests/{cr_id}` — детальная информация о заявке (требуются права `READER` в кластере заявки).
+- `POST /api/change-requests` — создание заявки на изменение очередей. Доступно: `WRITER`, `ADMIN`.
+- `POST /api/change-requests/{cr_id}/approve` — согласование заявки и генерация XML. Доступно: только `ADMIN`.
+- `POST /api/change-requests/{cr_id}/reject` — отклонение заявки. Доступно: только `ADMIN`.
+- `POST /api/change-requests/{cr_id}/cancel` — отзыв заявки (доступно автору заявки или `ADMIN`).
 
 ### Системные эндпоинты
 - `GET /health` — проверка жизнеспособности сервиса (`{"status": "ok"}`) для Kubernetes Liveness/Readiness probes (без авторизации).
@@ -66,8 +108,8 @@ backend/
 ### 1. Подготовка окружения
 ```bash
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -75,7 +117,11 @@ pip install -r requirements.txt
 | Переменная | Описание | Значение по умолчанию |
 |---|---|---|
 | `CONFIG_PATH` | Путь к файлу конфигурации `config.yaml` | `config/config.yaml` |
-| `DB_PATH` | Путь к файлу SQLite базы данных | `backend/yarn_explorer.db` |
+| `DB_PATH` | Путь к файлу SQLite базы данных | `data/yarn_explorer.db` |
+| `JWT_SECRET_KEY` | Секретный ключ подписи JWT (переопределяет `auth.jwt.secret_key`) | Из `config.yaml` |
+| `LDAP_BIND_PASSWORD` | Пароль сервисной учетной записи LDAP (переопределяет `auth.ldap.bind_password`) | Из `config.yaml` |
+| `SERVER_DEBUG` | Переопределение режима отладки (`true` / `false`) | `false` |
+| `CORS_ORIGINS` | Разрешенные origins через запятую (например, `http://localhost:8080,http://localhost:5173`) | Из `config.yaml` |
 | `KRB5_CONFIG` | Путь к файлу `krb5.conf` | `/etc/krb5.conf` |
 | `PYTHONUNBUFFERED` | Отключение буферизации вывода логов | `1` |
 
@@ -89,14 +135,17 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
 ## 🧪 Тестирование
 
-Запуск набора юнит-тестов с помощью `pytest`:
+Запуск полного набора автоматических тестов с помощью `pytest`:
 ```bash
 pytest backend/tests -v
 ```
 
 Тестирование покрывает:
-- Парсинг древовидной иерархии очередей и извлечение метрик RAM/vCPU.
-- Алгоритм автоматической балансировки ветки до 100%.
-- Точечную модификацию XML с сохранением необрабатываемых свойств и комментариев.
-- Генерацию правил `yarn.scheduler.capacity.queue-mappings`.
-- Ролевую модель доступа (RBAC) и генерацию JWT-токенов.
+- Балансировку емкости очередей и контроль инварианта 100%.
+- Генерацию `capacity-scheduler.xml` с сохранением сторонних параметров.
+- Защиту от инъекций (XML Comment Injection, LDAP Filter Injection).
+- Защиту от BOLA / IDOR в API заявок Change Requests.
+- Проверку политик доступа UI ACL.
+- Защиту от Timing Attacks при сравнении учетных данных.
+- Проверку наличия защитных HTTP-заголовков и политик CORS.
+

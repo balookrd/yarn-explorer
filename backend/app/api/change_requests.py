@@ -47,8 +47,18 @@ async def list_change_requests(
     status_filter: Optional[str] = Query(None, alias="status", description="Фильтр по статусу"),
     current_user: UserSession = Depends(get_current_user),
 ):
-    """Получить список заявок на изменение очередей."""
-    return storage_service.list_change_requests(cluster_id=cluster_id, status=status_filter)
+    """Получить список заявок на изменение очередей для доступных пользователю кластеров."""
+    if cluster_id:
+        cluster = _find_cluster(cluster_id)
+        check_cluster_permission(current_user, cluster, Role.READER)
+        return storage_service.list_change_requests(cluster_id=cluster_id, status=status_filter)
+
+    all_crs = storage_service.list_change_requests(status=status_filter)
+    accessible_cluster_ids = {
+        c.id for c in settings.clusters
+        if resolve_cluster_role(current_user, c) is not None
+    }
+    return [cr for cr in all_crs if cr.cluster_id in accessible_cluster_ids]
 
 
 @router.get("/pending-count")
@@ -56,8 +66,18 @@ async def get_pending_count(
     cluster_id: Optional[str] = Query(None),
     current_user: UserSession = Depends(get_current_user),
 ):
-    """Количество заявок, ожидающих согласования."""
-    count = storage_service.count_pending(cluster_id=cluster_id)
+    """Количество заявок, ожидающих согласования (только для доступных кластеров)."""
+    if cluster_id:
+        cluster = _find_cluster(cluster_id)
+        check_cluster_permission(current_user, cluster, Role.READER)
+        count = storage_service.count_pending(cluster_id=cluster_id)
+    else:
+        all_crs = storage_service.list_change_requests(status="SUBMITTED")
+        accessible_cluster_ids = {
+            c.id for c in settings.clusters
+            if resolve_cluster_role(current_user, c) is not None
+        }
+        count = sum(1 for cr in all_crs if cr.cluster_id in accessible_cluster_ids)
     return {"pending_count": count}
 
 
@@ -155,13 +175,15 @@ async def get_change_request(
     cr_id: int,
     current_user: UserSession = Depends(get_current_user),
 ):
-    """Получить подробную информацию о заявке по ID."""
+    """Получить подробную информацию о заявке по ID (требуются права Reader в кластере заявки)."""
     cr = storage_service.get_change_request(cr_id)
     if not cr:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Заявка #{cr_id} не найдена",
         )
+    cluster = _find_cluster(cr.cluster_id)
+    check_cluster_permission(current_user, cluster, Role.READER)
     return cr
 
 
