@@ -31,7 +31,7 @@
     ssoLoading = true;
     errorMessage = null;
     try {
-      const resp = await fetch('/api/auth/sso', {
+      const resp = await fetch('/api/v1/auth/sso', {
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
         credentials: 'include'
       });

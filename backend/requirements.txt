@@ -4,9 +4,11 @@ pydantic>=2.8.0
 pydantic-settings>=2.4.0
 pyyaml>=6.0.2
 
-# Database (поддержка SQLite и PostgreSQL)
+# Database (поддержка SQLite, PostgreSQL и Redis)
 sqlalchemy>=2.0.32
 psycopg2-binary>=2.9.9
+redis>=5.0.0
+fakeredis>=2.20.0
 
 # Security & Auth
 defusedxml>=0.7.1

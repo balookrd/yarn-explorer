@@ -241,22 +241,22 @@ def test_token_revocation_on_logout():
     client = TestClient(app)
 
     # 1. Логин
-    login_resp = client.post("/api/auth/login", json={"username": "admin_user", "password": "password123"})
+    login_resp = client.post("/api/v1/auth/login", json={"username": "admin_user", "password": "password123"})
     assert login_resp.status_code == 200
     token = login_resp.json()["access_token"]
     assert "access_token" in login_resp.cookies
 
     # 2. Проверяем, что токен работает
-    me_resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    me_resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert me_resp.status_code == 200
     assert me_resp.json()["username"] == "admin_user"
 
     # 3. Выход с отзывом токена
-    logout_resp = client.post("/api/auth/logout", headers={"Authorization": f"Bearer {token}"})
+    logout_resp = client.post("/api/v1/auth/logout", headers={"Authorization": f"Bearer {token}"})
     assert logout_resp.status_code == 200
 
     # 4. Повторный запрос с тем же токеном должен вернуть 401 Unauthorized
-    me_after_resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    me_after_resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert me_after_resp.status_code == 401
 
 
@@ -274,11 +274,11 @@ def test_rate_limiter_blocks_excessive_logins():
 
     # Делаем 10 запросов (разрешенный лимит)
     for _ in range(10):
-        resp = client.post("/api/auth/login", json={"username": "admin_user", "password": "wrongpassword"})
+        resp = client.post("/api/v1/auth/login", json={"username": "admin_user", "password": "wrongpassword"})
         assert resp.status_code == 401
 
     # 11-й запрос должен быть заблокирован с HTTP 429
-    blocked_resp = client.post("/api/auth/login", json={"username": "admin_user", "password": "wrongpassword"})
+    blocked_resp = client.post("/api/v1/auth/login", json={"username": "admin_user", "password": "wrongpassword"})
     assert blocked_resp.status_code == 429
     assert "Слишком много попыток" in blocked_resp.json()["detail"]
     assert "Retry-After" in blocked_resp.headers
@@ -373,17 +373,17 @@ def test_csrf_cookie_protection():
 
     client = TestClient(app)
 
-    login_resp = client.post("/api/auth/login", json={"username": "admin_user", "password": "password123"})
+    login_resp = client.post("/api/v1/auth/login", json={"username": "admin_user", "password": "password123"})
     assert login_resp.status_code == 200
     token = login_resp.json()["access_token"]
 
     # 1. Запрос с cookie без Origin/Referer/X-Requested-With (fail-open check) -> 403
-    resp_failopen = client.post("/api/auth/logout", cookies={"access_token": token})
+    resp_failopen = client.post("/api/v1/auth/logout", cookies={"access_token": token})
     assert resp_failopen.status_code == 403
 
     # 2. Запрос с поддельным Origin -> 403
     resp_evil = client.post(
-        "/api/auth/logout",
+        "/api/v1/auth/logout",
         cookies={"access_token": token},
         headers={"Origin": "http://evil-attacker.com"}
     )
@@ -391,7 +391,7 @@ def test_csrf_cookie_protection():
 
     # 3. Легитимный запрос с X-Requested-With -> 200
     resp_ok = client.post(
-        "/api/auth/logout",
+        "/api/v1/auth/logout",
         cookies={"access_token": token},
         headers={"X-Requested-With": "XMLHttpRequest"}
     )
@@ -453,7 +453,7 @@ def test_spnego_kerberos_ldap_enrichment(monkeypatch):
 
     monkeypatch.setattr(auth_module.settings.auth.ldap, "enabled", True)
 
-    resp = client.get("/api/auth/negotiate", headers={"Authorization": "Negotiate YWJjMTIz"})
+    resp = client.get("/api/v1/auth/negotiate", headers={"Authorization": "Negotiate YWJjMTIz"})
     assert resp.status_code == 200
     user = resp.json()["user"]
     assert user["username"] == "spnego_dev"
@@ -468,13 +468,13 @@ def test_no_query_param_token_support():
     from app.main import app
 
     client = TestClient(app)
-    login_resp = client.post("/api/auth/login", json={"username": "admin_user", "password": "password123"})
+    login_resp = client.post("/api/v1/auth/login", json={"username": "admin_user", "password": "password123"})
     token = login_resp.json()["access_token"]
 
     # Очищаем cookies клиента
     client.cookies.clear()
 
-    resp = client.get(f"/api/auth/me?token={token}")
+    resp = client.get(f"/api/v1/auth/me?token={token}")
     assert resp.status_code == 401
 
 
@@ -490,17 +490,17 @@ def test_mock_users_strict_isolation_yarn(monkeypatch):
 
     # 1. При mode == 'mock' вход успешен
     monkeypatch.setattr(settings.auth, "mode", "mock")
-    resp_mock = client.post("/api/auth/login", json={"username": "admin_user", "password": "password123"})
+    resp_mock = client.post("/api/v1/auth/login", json={"username": "admin_user", "password": "password123"})
     assert resp_mock.status_code == 200
 
     # 2. При mode == 'hybrid' mock-пользователи запрещены -> 401
     monkeypatch.setattr(settings.auth, "mode", "hybrid")
-    resp_hybrid = client.post("/api/auth/login", json={"username": "admin_user", "password": "password123"})
+    resp_hybrid = client.post("/api/v1/auth/login", json={"username": "admin_user", "password": "password123"})
     assert resp_hybrid.status_code == 401
 
     # 3. При mode == 'ldaps_only' mock-пользователи запрещены -> 401
     monkeypatch.setattr(settings.auth, "mode", "ldaps_only")
-    resp_ldap = client.post("/api/auth/login", json={"username": "admin_user", "password": "password123"})
+    resp_ldap = client.post("/api/v1/auth/login", json={"username": "admin_user", "password": "password123"})
     assert resp_ldap.status_code == 401
 
 
@@ -685,6 +685,62 @@ def test_yarn_granular_rate_limiting_per_user():
     # Для другого пользователя user2 с того же IP лимит не исчерпан (защита от DoS NAT)
     allowed_user2, _ = limiter.is_allowed("192.0.2.1:user2")
     assert allowed_user2 is True
+
+
+def test_storage_service_redis_backend():
+    """Проверяет работу StorageService в режиме Redis (rate limits, revoked tokens, change requests)."""
+    import fakeredis
+    from unittest.mock import patch
+    from app.services.storage import StorageService
+    from app.models.yarn import DraftQueueItem, DiffItem
+
+    fake_client = fakeredis.FakeRedis(decode_responses=True)
+
+    with patch("redis.Redis.from_url", return_value=fake_client):
+        redis_storage = StorageService(db_url="redis://localhost:6379/0")
+        assert redis_storage._is_redis is True
+
+        # 1. Rate Limiter в Redis
+        key = "10.0.0.1:tester"
+        ok1, _ = redis_storage.check_and_record_rate_limit(key, max_requests=2, window_seconds=60)
+        assert ok1 is True
+        ok2, _ = redis_storage.check_and_record_rate_limit(key, max_requests=2, window_seconds=60)
+        assert ok2 is True
+        ok3, retry = redis_storage.check_and_record_rate_limit(key, max_requests=2, window_seconds=60)
+        assert ok3 is False
+        assert retry > 0
+
+        # 2. Token Revocation (Blacklist) в Redis
+        jti = "test-jti-redis-12345"
+        assert redis_storage.is_token_revoked(jti) is False
+        assert redis_storage.revoke_token(jti, "2030-01-01T00:00:00Z") is True
+        assert redis_storage.is_token_revoked(jti) is True
+
+        # 3. Change Requests в Redis
+        cr_id = redis_storage.save_change_request(
+            cluster_id="cluster-prod",
+            title="Redis Change Request",
+            description="Testing Redis CR backend",
+            author="redis_dev",
+            changes=[],
+            diffs=[],
+        )
+        assert cr_id > 0
+        cr = redis_storage.get_change_request(cr_id)
+        assert cr is not None
+        assert cr.title == "Redis Change Request"
+        assert cr.author == "redis_dev"
+        assert cr.status == "SUBMITTED"
+
+        # Листинг
+        crs = redis_storage.list_change_requests(cluster_id="cluster-prod")
+        assert len(crs) >= 1
+
+        # Approve
+        approved = redis_storage.approve_change_request(cr_id, reviewer="admin", comment="OK", xml_content="<xml/>")
+        assert approved is True
+        assert redis_storage.get_change_request(cr_id).status == "APPROVED"
+
 
 
 
