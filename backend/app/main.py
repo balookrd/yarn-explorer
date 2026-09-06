@@ -20,6 +20,14 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.services.storage import storage_service
+    # Очистка устаревших отозванных токенов и лимитов при запуске
+    try:
+        storage_service.cleanup_expired_tokens()
+        storage_service.cleanup_rate_limits()
+    except Exception as e:
+        logger.warning(f"Ошибка фоновой очистки SQLite: {e}")
+
     logger.info("=" * 60)
     logger.info("YARN Queue Explorer запущен")
     logger.info(f"  Режим аутентификации: {settings.auth.mode}")

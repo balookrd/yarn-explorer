@@ -1,48 +1,50 @@
 import time
-from collections import defaultdict
-from typing import Dict, List
+from typing import Optional
 from fastapi import Request, HTTPException, status
+
+from app.services.storage import storage_service
 
 
 class RateLimiter:
     """
-    Легковесный ограничитель частоты запросов на базе скользящего окна по IP.
+    Ограничитель частоты запросов на базе скользящего окна (sliding window),
+    сохраняющий состояние в SQLite (yarn_explorer.db).
+    
+    Поддерживает совместную работу между процессами/воркерами Uvicorn
+    и переживает перезапуск приложения.
     """
     def __init__(self, max_requests: int = 10, window_seconds: int = 60):
         self.max_requests = max_requests
         self.window_seconds = window_seconds
-        self._requests: Dict[str, List[float]] = defaultdict(list)
 
-    def _cleanup(self, now: float):
-        cutoff = now - self.window_seconds
-        for ip in list(self._requests.keys()):
-            self._requests[ip] = [ts for ts in self._requests[ip] if ts > cutoff]
-            if not self._requests[ip]:
-                del self._requests[ip]
-
-    def __call__(self, request: Request):
-        # Определение IP клиента (с учетом возможных reverse proxy заголовков)
+    def _get_client_ip(self, request: Request) -> str:
         forwarded_for = request.headers.get("X-Forwarded-For")
         if forwarded_for:
-            client_ip = forwarded_for.split(",")[0].strip()
+            return forwarded_for.split(",")[0].strip()
         elif request.client:
-            client_ip = request.client.host
-        else:
-            client_ip = "unknown"
+            return request.client.host
+        return "unknown"
 
-        now = time.time()
-        self._cleanup(now)
+    def is_allowed(self, key: str, now: Optional[float] = None) -> tuple[bool, int]:
+        """Проверяет лимит и записывает попытку. Возвращает (is_allowed, retry_after)."""
+        return storage_service.check_and_record_rate_limit(
+            key=key,
+            max_requests=self.max_requests,
+            window_seconds=self.window_seconds,
+            now=now,
+        )
 
-        timestamps = self._requests[client_ip]
-        if len(timestamps) >= self.max_requests:
-            retry_after = int(self.window_seconds - (now - timestamps[0]))
+    def __call__(self, request: Request):
+        client_ip = self._get_client_ip(request)
+        allowed, retry_after = self.is_allowed(key=f"ip:{client_ip}")
+
+        if not allowed:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Слишком много попыток. Пожалуйста, повторите через {max(1, retry_after)} сек.",
-                headers={"Retry-After": str(max(1, retry_after))},
+                detail=f"Слишком много попыток. Пожалуйста, повторите через {retry_after} сек.",
+                headers={"Retry-After": str(retry_after)},
             )
-
-        self._requests[client_ip].append(now)
 
 
 auth_rate_limiter = RateLimiter(max_requests=10, window_seconds=60)
+

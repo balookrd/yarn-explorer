@@ -259,14 +259,16 @@ def test_token_revocation_on_logout():
 
 
 def test_rate_limiter_blocks_excessive_logins():
-    """Проверяет ограничение частоты запросов Rate Limiter."""
+    """Проверяет ограничение частоты запросов Rate Limiter в SQLite."""
     from fastapi.testclient import TestClient
     from app.main import app
-    from app.core.rate_limiter import auth_rate_limiter
+    from app.services.storage import storage_service
 
     client = TestClient(app)
-    # Сбрасываем счетчик для чистоты теста
-    auth_rate_limiter._requests.clear()
+    # Очищаем таблицу перед тестом
+    with storage_service._get_connection() as conn:
+        conn.cursor().execute("DELETE FROM rate_limits")
+        conn.commit()
 
     # Делаем 10 запросов (разрешенный лимит)
     for _ in range(10):
@@ -277,9 +279,12 @@ def test_rate_limiter_blocks_excessive_logins():
     blocked_resp = client.post("/api/auth/login", json={"username": "admin_user", "password": "wrongpassword"})
     assert blocked_resp.status_code == 429
     assert "Слишком много попыток" in blocked_resp.json()["detail"]
+    assert "Retry-After" in blocked_resp.headers
 
     # Очищаем после теста
-    auth_rate_limiter._requests.clear()
+    with storage_service._get_connection() as conn:
+        conn.cursor().execute("DELETE FROM rate_limits")
+        conn.commit()
 
 
 def test_mock_auth_bcrypt_hash():

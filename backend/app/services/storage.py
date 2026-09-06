@@ -55,9 +55,16 @@ class StorageService:
                     expires_at TEXT NOT NULL
                 );
             """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS rate_limits (
+                    key TEXT NOT NULL,
+                    timestamp REAL NOT NULL
+                );
+            """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_cr_cluster ON change_requests(cluster_id);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_cr_status ON change_requests(status);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_revoked_exp ON revoked_tokens(expires_at);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_rate_limits ON rate_limits(key, timestamp);")
             conn.commit()
             logger.info(f"SQLite база данных инициализирована: {self.db_path}")
 
@@ -267,6 +274,54 @@ class StorageService:
                 conn.commit()
         except Exception as e:
             logger.warning(f"Ошибка очистки устаревших отозванных токенов: {e}")
+
+    def check_and_record_rate_limit(
+        self, key: str, max_requests: int, window_seconds: int, now: Optional[float] = None
+    ) -> tuple[bool, int]:
+        """
+        Проверяет и регистрирует попытку запроса в SQLite (sliding window).
+        Возвращает (allowed, retry_after_seconds).
+        """
+        import time
+        current_time = now if now is not None else time.time()
+        cutoff = current_time - window_seconds
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                # Удаляем устаревшие записи для данного ключа
+                cursor.execute("DELETE FROM rate_limits WHERE key = ? AND timestamp < ?", (key, cutoff))
+                # Получаем все оставшиеся временные метки отсортированными
+                cursor.execute(
+                    "SELECT timestamp FROM rate_limits WHERE key = ? ORDER BY timestamp ASC",
+                    (key,),
+                )
+                rows = cursor.fetchall()
+                count = len(rows)
+
+                if count >= max_requests:
+                    oldest_ts = rows[0][0]
+                    retry_after = max(1, int(window_seconds - (current_time - oldest_ts)))
+                    return False, retry_after
+
+                cursor.execute("INSERT INTO rate_limits (key, timestamp) VALUES (?, ?)", (key, current_time))
+                conn.commit()
+                return True, 0
+        except Exception as e:
+            logger.error(f"Ошибка проверки rate limit для {key}: {e}")
+            # Fallback: в случае сбоя БД не блокируем легитимных пользователей
+            return True, 0
+
+    def cleanup_rate_limits(self, older_than_seconds: int = 3600):
+        """Удаляет из базы все записи rate limit старше заданного времени."""
+        import time
+        cutoff = time.time() - older_than_seconds
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM rate_limits WHERE timestamp < ?", (cutoff,))
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"Ошибка очистки rate limits: {e}")
 
 
 storage_service = StorageService()
