@@ -47,13 +47,14 @@
   - Сессионные токены передаются исключительно через заголовок `Authorization: Bearer` или защищенные `HttpOnly`, `SameSite=Lax` Cookie (полный отказ от `localStorage` и query-параметров).
   - Строгая защита от CSRF (`verify_csrf`) по точным схемам URL (`urlparse`) с режимом Fail-Closed при отсутствии или несовпадении источников.
   - Скользящий лимитер запросов (Rate Limiting) с защитой от IP Spoofing (доверие `X-Forwarded-For` только от доверенных прокси) и заголовком `Retry-After`.
-  - Персистентный отзыв токенов при выходе (Logout Blacklist на PyJWT).
+  - Персистентное хранилище заявок (Change Requests) и черного списка токенов на базе **SQLAlchemy Core** с поддержкой **PostgreSQL** и **SQLite WAL**.
   - Потокобезопасная изоляция сессий `YarnClient` при обращениях к YARN ResourceManager REST API.
   - Строгая изоляция тестовых аккаунтов (`mock_users` активны только при `auth.mode: "mock"`).
-  - Автоматические HTTP Security Headers (`Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`).
-  - Защита от XML Comment / Configuration Injection при генерации `capacity-scheduler.xml` и защита от BOLA / IDOR в API заявок.
+  - Строгий **Content-Security-Policy (CSP)**: директивы `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`.
+  - **Комплексная защита XML (XXE & Injection Guard)**: безопасный парсинг входящих XML через `defusedxml` с блокировкой entity expansion / billion laughs атак, а также экранирование комментариев и свойств.
+  - Защита от BOLA / IDOR в API заявок и соблюдение принципа Four-Eyes.
   - Структурированный аудит безопасности (JSON) всех операций входа и изменений очередей для интеграции с SIEM/SOC.
-  - Запуск Docker-контейнера от непривилегированного пользователя (`appuser`, UID 10001) и изоляция секретов Helm через Kubernetes `Secret`.
+  - Запуск Docker-контейнера от непривилегированного пользователя (`appuser`, UID 10001), управление секретами через Kubernetes `Secret` и автоматическое ограничение реплик (`replicas: 1`) в Helm при использовании локальной SQLite.
 
 ### 2. Управление ресурсами очередей и Node Labels
 - **Node Labels и партиционирование кластера**:

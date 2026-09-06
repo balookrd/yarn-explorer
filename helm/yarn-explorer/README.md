@@ -8,7 +8,7 @@ Production-ready Helm-чарт для развертывания веб-прил
 - **Интеграция с Kerberos / SPNEGO**:
   - Монтирование пользовательского файла конфигурации `krb5.conf` через ConfigMap.
   - Поддержка создания K8s Secret с base64-кодированным keytab (`keytabBase64`) или использование существующего секрета (`existingSecret`).
-- **Персистентность SQLite**: автоматическое создание `PersistentVolumeClaim` для хранения базы данных заявок (`/app/data/yarn_explorer.db`). При включенном PVC стратегия деплоя автоматически переключается на `Recreate` для исключения блокировок базы данных.
+- **Хранение состояния (PostgreSQL / SQLite)**: поддержка внешней базы данных PostgreSQL (`config.database.url`) или встроенного SQLite через `PersistentVolumeClaim` (`/app/data/yarn_explorer.db`). При использовании SQLite количество реплик автоматически ограничивается `replicas: 1` для предотвращения блокировок файлов.
 - **Корпоративная аутентификация**: полная поддержка конфигурации LDAP/Active Directory и сопоставления групп с ролями (ADMIN, WRITER, READER).
 - **Ingress & TLS**: интеграция с Ingress-контроллерами (`ingress-nginx`, Traefik и др.) и автоматическая TLS-терминация.
 - **Health Probes**: Liveness и Readiness пробы по эндпоинту `/health`.
@@ -174,10 +174,15 @@ config:
     debug: false
     cors_origins:
       - "https://yarn-explorer.company.local"
+  database:
+    url: "postgresql://yarn_user:yarn_pass@postgres.yarn-system.svc:5432/yarn_explorer"
   auth:
     mode: "hybrid"
     jwt:
       secret_key: "super-secure-production-jwt-token-key-2026"
+
+secrets:
+  databasePassword: "ComplexDatabasePassword123"
       expire_minutes: 720
     ldap:
       enabled: true

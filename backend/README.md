@@ -46,7 +46,8 @@ backend/
 
 1. **Строгая защита от CSRF**:
    - Валидация источников через `urllib.parse.urlparse` со строгим сопоставлением с `server.cors_origins` и `Host` заголовком. Режим Fail-Closed отклоняет мутирующие cookie-запросы без валидных источников.
-2. **Защита от инъекций**:
+2. **Защита от инъекций и XXE**:
+   - **XXE & DoS Protection**: Парсинг XML через `defusedxml.ElementTree` с блокировкой entity expansion, DTD и billion laughs атак.
    - **LDAP Filter Injection**: Входные данные экранируются через `ldap3.utils.conv.escape_filter_chars` перед передачей в фильтры поиска каталогов.
    - **XML Comment / Configuration Injection**: Поля `comment` и `generated_by` экранируются функцией `_sanitize_xml_comment`, исключающей разрыв XML-комментариев (`-->`) и внедрение недопустимых свойств в `capacity-scheduler.xml`.
 3. **Защита от BOLA / IDOR и принцип Four-Eyes**:
@@ -58,16 +59,17 @@ backend/
    - Обогащение LDAP-группами при Kerberos SPNEGO SSO для корректного назначения ролей.
 5. **Потокобезопасность сессий**:
    - Изоляция сессий `requests.Session` на каждый асинхронный вызов к YARN RM, исключающая гонки данных и утечки сессий.
-6. **Серверная инвалидация токенов (Token Revocation / Blacklist)**:
-   - При завершении сессии (`POST /api/auth/logout`) токен извлекается через `PyJWT` и помещается в серверный чёрный список (`revoked_tokens` в SQLite) по уникальному `jti`.
+6. **Серверная инвалидация токенов и персистентность (SQLAlchemy Core)**:
+   - Хранилище заявок (Change Requests) и черного списка токенов на базе `SQLAlchemy Core` с поддержкой как `SQLite` (WAL), так и `PostgreSQL`.
 7. **Защита от брутфорса и IP-спуфинга (Rate Limiting)**:
    - Эндпоинты аутентификации защищены ограничителем частоты запросов с защитой от IP-спуфинга (доверяет `X-Forwarded-For` только от доверенных прокси).
-8. **Безопасные сессии (HttpOnly Cookies)**:
+8. **Безопасные сессии (HttpOnly Cookies) и CSP**:
    - Токены принимаются через `Authorization: Bearer` или `HttpOnly`, `SameSite=Lax`, `Path=/` (и `Secure` в продакшне) Cookie. Токены в query-параметрах заблокированы.
+   - Защитные заголовки Content-Security-Policy: `default-src 'self'`, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`.
 9. **Строгая изоляция Mock-пользователей**:
    - Локальные mock-пользователи разрешены исключительно при режиме `auth.mode: "mock"`.
 10. **Управление секретами через Kubernetes Secret**:
-   - Чувствительные параметры (`JWT_SECRET_KEY`, `LDAP_BIND_PASSWORD`, `Keytab`) монтируются через Kubernetes `Secret`.
+    - Чувствительные параметры (`JWT_SECRET_KEY`, `LDAP_BIND_PASSWORD`, `DATABASE_PASSWORD`, `Keytab`) монтируются через Kubernetes `Secret`.
 
 ---
 
