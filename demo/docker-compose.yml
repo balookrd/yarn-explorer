@@ -1,3 +1,5 @@
+name: yarn-explorer-demo
+
 networks:
   yarn-demo-net:
     name: yarn-demo-net
