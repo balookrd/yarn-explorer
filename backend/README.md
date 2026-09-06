@@ -9,16 +9,18 @@
 ```
 backend/
 ├── app/
-│   ├── api/                     # REST API контроллеры
-│   │   ├── auth.py              # Аутентификация (/api/auth/login, /spnego, /me, /logout)
-│   │   ├── clusters.py          # Список кластеров (/api/clusters)
-│   │   ├── queues.py            # Очереди, валидация, diff, XML (/api/clusters/{cluster_id}/...)
-│   │   └── change_requests.py   # Управление заявками (/api/change-requests)
+│   ├── api/                     # REST API контроллеры (v1)
+│   │   ├── auth.py              # Аутентификация (/api/v1/auth/login, /sso, /me, /logout)
+│   │   ├── clusters.py          # Список кластеров (/api/v1/clusters)
+│   │   ├── queues.py            # Очереди, валидация, diff, XML (/api/v1/clusters/{cluster_id}/...)
+│   │   └── change_requests.py   # Управление заявками (/api/v1/change-requests)
 │   ├── core/                    # Ядро сервиса
 │   │   ├── acl.py               # Проверка ACL (check_ui_access, resolve_cluster_role, check_cluster_permission)
+│   │   ├── audit.py             # Структурированный аудит безопасности и изменений очередей
 │   │   ├── config.py            # Pydantic Settings, загрузка config.yaml
 │   │   ├── kerberos.py          # KerberosManager (kinit, SPNEGO)
 │   │   ├── ldap_auth.py         # LdapService с защитой от LDAP-инъекций и валидацией TLS
+│   │   ├── rate_limiter.py      # Rate Limiting (Sliding Window через StorageService)
 │   │   └── security.py          # JWT-токены, get_current_user с валидацией UI ACL
 │   ├── models/                  # Pydantic-модели и схемы данных
 │   │   ├── auth.py              # UserSession, Role, TokenResponse, LoginRequest
@@ -28,14 +30,16 @@ backend/
 │   ├── services/                # Бизнес-логика
 │   │   ├── capacity_scheduler.py# Алгоритмы проверки баланса очередей
 │   │   ├── mock_yarn.py         # Mock данные для dev режима
-│   │   ├── storage.py           # Хранилище заявок в SQLite (WAL-режим, timeout=30s)
+│   │   ├── storage.py           # Tri-Storage: Redis, PostgreSQL, SQLite
 │   │   ├── xml_generator.py     # Точечная модификация capacity-scheduler.xml с санитизацией
 │   │   └── yarn_client.py       # REST API клиент YARN RM с поддержкой Kerberos SPNEGO и HA
-│   └── main.py                  # Входная точка FastAPI, безопасный CORS, Security Headers, /health
-└── tests/                       # Автоматические тесты на pytest
-    ├── test_capacity_scheduler.py # Тесты балансировки и генерации XML
-    ├── test_change_requests.py   # Тесты CRUD хранилища заявок
-    └── test_security.py          # Тесты безопасности (инъекции, BOLA, ACL, валидация)
+│   └── main.py                  # Входная точка FastAPI, безопасный CORS, Security Headers, /healthz
+├── tests/                       # Автоматические тесты на pytest
+│   ├── conftest.py              # Автосброс rate limits в тестах
+│   ├── test_capacity_scheduler.py # Тесты балансировки и генерации XML
+│   ├── test_change_requests.py   # Тесты CRUD хранилища заявок
+│   └── test_security.py          # Тесты безопасности (инъекции, BOLA, ACL, валидация)
+└── requirements.txt             # Зависимости Python
 ```
 
 ---
@@ -51,12 +55,12 @@ backend/
    - **LDAP Filter Injection**: Входные данные экранируются через `ldap3.utils.conv.escape_filter_chars` перед передачей в фильтры поиска каталогов.
    - **XML Comment / Configuration Injection**: Поля `comment` и `generated_by` экранируются функцией `_sanitize_xml_comment`, исключающей разрыв XML-комментариев (`-->`) и внедрение недопустимых свойств в `capacity-scheduler.xml`.
 3. **Защита от BOLA / IDOR и принцип Four-Eyes**:
-   - Доступ к деталям заявки (`GET /api/change-requests/{id}`) строго ограничен правами пользователя в соответствующем кластере.
+   - Доступ к деталям заявки (`GET /api/v1/change-requests/{id}`) строго ограничен правами пользователя в соответствующем кластере.
    - Запрещено самостоятельное одобрение автором своей собственной заявки (`Four-Eyes Principle`).
 4. **Двухуровневый контроль доступа (RBAC & UI ACL)**:
    - `check_ui_access`: проверка права доступа пользователя к интерфейсу и API на основе глобальных политик `acl.ui_access`.
    - `resolve_cluster_role` & `check_cluster_permission`: гранулярное разделение прав по каждому кластеру (ADMIN, WRITER, READER).
-   - Обогащение LDAP-группами при Kerberos SPNEGO SSO для корректного назначения ролей.
+   - Обогащение LDAP-группами при Kerberos SPNEGO SSO (`/api/v1/auth/sso`) для корректного назначения ролей.
 5. **Потокобезопасность сессий**:
    - Изоляция сессий `requests.Session` на каждый асинхронный вызов к YARN RM, исключающая гонки данных и утечки сессий.
 6. **Серверная инвалидация токенов и персистентность (SQLAlchemy Core)**:
