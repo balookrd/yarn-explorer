@@ -74,7 +74,10 @@ async def add_security_headers(request, call_next):
         "font-src 'self' data:; "
         "img-src 'self' data:; "
         "connect-src 'self'; "
-        "frame-ancestors 'none';"
+        "frame-ancestors 'none'; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self';"
     )
     return response
 

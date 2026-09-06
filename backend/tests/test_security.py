@@ -581,3 +581,34 @@ def test_tls_verification_defaults_yarn():
     assert settings.auth.ldap.verify_cert is True
 
 
+def test_xxe_entity_expansion_protection():
+    """Проверяет защиту от XXE (XML External Entity) и Entity Expansion инъекций при обновлении XML."""
+    from app.services.xml_generator import update_capacity_scheduler_xml
+    from app.models.cluster import ClusterConfig, ClusterResources
+
+    cluster = ClusterConfig(
+        id="test-cluster",
+        name="Test Cluster",
+        resource_manager_urls=["http://rm:8088"],
+        total_resources=ClusterResources(memory_mb=1024, vcores=4),
+    )
+
+    # Попытка внедрения внешней сущности DTD (XXE)
+    malicious_xxe_xml = """<?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE foo [ <!ENTITY xxe SYSTEM "file:///etc/passwd"> ]>
+    <configuration>
+        <property>
+            <name>yarn.scheduler.capacity.root.queues</name>
+            <value>&xxe;</value>
+        </property>
+    </configuration>
+    """
+
+    with pytest.raises(ValueError, match="Небезопасный XML документ"):
+        update_capacity_scheduler_xml(
+            base_xml=malicious_xxe_xml,
+            queues=[],
+            cluster=cluster,
+        )
+
+

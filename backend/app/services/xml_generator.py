@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from collections import defaultdict
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
+import defusedxml.ElementTree as DefusedET
+from defusedxml.common import DefusedXmlException
 
 from app.models.yarn import QueueDraftItem
 from app.models.cluster import ClusterConfig
@@ -193,8 +195,13 @@ def update_capacity_scheduler_xml(
     - Удаляет свойства удаленных очередей и исключает их из .queues родителя.
     """
     try:
+        # Проверяем base_xml на безопасность от XXE, External Entities и Entity Expansion
+        DefusedET.fromstring(base_xml)
         parser = ET.XMLParser(target=ET.TreeBuilder(insert_comments=True))
         root = ET.fromstring(base_xml, parser=parser)
+    except DefusedXmlException as dxe:
+        logger.error(f"Попытка передачи небезопасного XML (XXE/Entity Injection): {dxe}")
+        raise ValueError(f"Небезопасный XML документ: обнаружена попытка XXE/Entity Expansion ({dxe})")
     except Exception as e:
         logger.warning(f"Ошибка разбора base_xml: {e}. Переключаемся на генерацию с чистого листа.")
         return generate_capacity_scheduler_xml(
